@@ -18,12 +18,17 @@ usage: inference.py [-h] [--model_path MODEL_PATH] [--theme THEME]
     Date: 2021/11/03
     
 """
+from abc import ABC
+
+from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
+
 device_str = "cuda:0"
 import os
 import shutil
 
 import torch
 import torch.optim
+import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 
 import logger
@@ -32,6 +37,154 @@ from parse_arg import *
 from preprocess.music_data import getMusicDataset
 from preprocess.vocab import Vocab
 from randomness import set_global_random_seed
+
+
+class ThemeTransformer(pl.LightningModule):
+    def test_dataloader(self) -> EVAL_DATALOADERS:
+        pass
+
+    def val_dataloader(self) -> EVAL_DATALOADERS:
+        pass
+
+    def predict_dataloader(self) -> EVAL_DATALOADERS:
+        pass
+
+    def train_dataloader(self) -> TRAIN_DATALOADERS:
+        pass
+
+    def __init__(self, vocab, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
+        super().__init__()
+        self.transformer = myLM(vocab.n_tokens,
+                                d_model=d_model,
+                                num_encoder_layers=num_encoder_layers,
+                                xorpattern=xorpattern)
+        self.total_acc = 0
+        self.total_loss = 0
+        self.train_step = 0
+        self.vocab = vocab
+
+        self.automatic_optimization = False
+        self.criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
+
+    def configure_optimizers(self):
+        return [torch.optim.Adam(self.transformer.parameters(), lr=args.lr)], \
+               [torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.max_step, eta_min=args.lr_min)]
+
+    def training_step(self, data, batch_idx):
+        optimizer, scheduler = self.optimizers()
+        optimizer, scheduler = optimizer[0], scheduler[0]
+        optimizer.zero_grad()
+
+        data["src_msk"] = data["src_msk"].bool()
+        data["tgt_msk"] = data["tgt_msk"].bool()
+
+        tgt_input_msk = data["tgt_msk"][:, :-1]
+        tgt_output_msk = data["tgt_msk"][:, 1:]
+
+        data["src"] = data["src"].permute(1, 0)
+        data["tgt"] = data["tgt"].permute(1, 0)
+        data["tgt_theme_msk"] = data["tgt_theme_msk"].permute(1, 0)
+
+        fullsong_input = data["tgt"][:-1, :]
+        fullsong_output = data["tgt"][1:, :]
+
+        att_msk = self.transformer.transformer_model.generate_square_subsequent_mask(
+            fullsong_input.shape[0]
+        )
+
+        mem_msk = None
+
+        output = self.transformer(
+            src=data["src"],
+            tgt=fullsong_input,
+            tgt_mask=att_msk,
+            tgt_label=data["tgt_theme_msk"][:-1, :],
+            src_key_padding_mask=data["src_msk"],
+            tgt_key_padding_mask=tgt_input_msk,
+            memory_mask=mem_msk,
+        )
+
+        loss = self.criterion(output.view(-1, self.vocab.n_tokens), fullsong_output.reshape(-1))
+
+        predict = output.view(-1, self.vocab.n_tokens).argmax(dim=-1)
+
+        correct = predict.eq(fullsong_output.reshape(-1))
+        correct = torch.sum(correct * (~tgt_output_msk).reshape(-1).float()).item()
+        correct = correct / torch.sum((~tgt_output_msk).reshape(-1).float()).item()
+        self.total_acc += correct
+
+        print("Acc : {:.2f} ".format(correct), end="")
+
+        self.manual_backward(loss)
+        torch.nn.utils.clip_grad_norm_(self.transformer.parameters(), args.clip)
+        optimizer.step()
+
+        if self.train_step < args.warmup_step:
+            curr_lr = args.lr * self.train_step / args.warmup_step
+            optimizer.param_groups[0]["lr"] = curr_lr
+        else:
+            scheduler.step()
+
+        self.total_loss += loss.item()
+
+        _curr_lr = optimizer.param_groups[0]["lr"]
+        print(
+            "Loss : {:.2f} lr:{:.4f} ".format(
+                loss.item(), curr_lr
+            ),
+            end="\r",
+        )
+
+        self.train_step += 1
+        self.log('train_loss', loss)
+        self.log('lr', curr_lr)
+
+    def validation_step(self, data, batch_idx):
+        optimizer = self.optimizers()
+        optimizer.zero_grad()
+
+        data["src_msk"] = data["src_msk"].bool()
+        data["tgt_msk"] = data["tgt_msk"].bool()
+
+        tgt_input_msk = data["tgt_msk"][:, :-1]
+        tgt_output_msk = data["tgt_msk"][:, 1:]
+
+        data["src"] = data["src"].permute(1, 0)
+        data["tgt"] = data["tgt"].permute(1, 0)
+        data["tgt_theme_msk"] = data["tgt_theme_msk"].permute(1, 0)
+
+        fullsong_input = data["tgt"][:-1, :]
+        fullsong_output = data["tgt"][1:, :]
+
+        att_msk = self.transformer.transformer_model.generate_square_subsequent_mask(
+            fullsong_input.shape[0]
+        )
+
+        mem_msk = None
+
+        output = self.transformer(
+            src=data["src"],
+            tgt=fullsong_input,
+            tgt_mask=att_msk,
+            tgt_label=data["tgt_theme_msk"][:-1, :],
+            src_key_padding_mask=data["src_msk"],
+            tgt_key_padding_mask=tgt_input_msk,
+            memory_mask=mem_msk,
+        )
+
+        loss = self.criterion(
+            output.view(-1, self.vocab.n_tokens), fullsong_output.reshape(-1)
+        )
+
+        predict = output.view(-1, self.vocab.n_tokens).argmax(dim=-1)
+        correct = predict.eq(fullsong_output.reshape(-1))
+        correct = torch.sum(correct * (~tgt_output_msk).reshape(-1).float()).item()
+        correct = correct / torch.sum((~tgt_output_msk).reshape(-1).float()).item()
+
+        self.total_acc += correct
+        self.total_loss += loss.item()
+        self.log('val_loss', loss)
+
 
 # Set the random seed manually for reproducibility.
 set_global_random_seed(args.seed)
@@ -81,13 +234,6 @@ mylogger = logger.logger(
 if os.path.exists("logs/log_{}.txt".format(exp_name)):
     os.remove("logs/log_{}.txt".format(exp_name))
 os.link(mylogger.filepath, "logs/log_{}.txt".format(exp_name))
-mylogger.log("Exp_dir : {}".format(checkpoint_folder))
-mylogger.log("Exp_Name : {}".format(exp_name))
-
-
-# devices
-device = torch.device("cuda:0")  # device_str if args.cuda else 'cpu')
-device_cpu = torch.device("cpu")
 
 
 # dataset
@@ -109,261 +255,3 @@ train_loader = DataLoader(
 )
 
 val_loader = DataLoader(dataset=val_dataset, batch_size=2, shuffle=False, num_workers=4)
-
-# define model
-model = myLM(
-    myvocab.n_tokens, d_model=256, num_encoder_layers=6, xorpattern=[0, 0, 0, 1, 1, 1]
-)
-
-mylogger.log("Model hidden dim : {}".format(model.d_model))
-mylogger.log("Encoder Layers #{}".format(model.num_encoder_layers))
-mylogger.log("Decoder Layers #{}".format(len(model.xorpattern)))
-mylogger.log("Decoder Pattern #{}".format(model.xorpattern))
-mylogger.log("Batch size #{}".format(args.batch_size))
-mylogger.log("lr : {}".format(args.lr))
-# optimizer
-# adam
-optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-
-# scheduler
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-    optimizer, T_max=args.max_step, eta_min=args.lr_min
-)
-
-if not args.restart_point == "":
-    # restart from checkpoint
-    mylogger.log("Restart from {}".format(args.restart_point))
-    model.load_state_dict(torch.load(args.restart_point, map_location=device_str))
-    mylogger.log("model loaded")
-    optimizer.load_state_dict(
-        torch.load(
-            args.restart_point.replace("model_", "optimizer_"), map_location=device_str
-        )
-    )
-    mylogger.log("optimizer loaded")
-    scheduler.load_state_dict(
-        torch.load(
-            args.restart_point.replace("model_", "scheduler_"), map_location=device_str
-        )
-    )
-    mylogger.log("scheduler loaded")
-
-    for state in optimizer.state.values():
-        for k, v in state.items():
-            if torch.is_tensor(v):
-                state[k] = v.to(device)
-
-# loss
-criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
-
-mylogger.log("Using device : {}".format(logger.getCyan(device)))
-
-train_step = 0
-
-
-def train(epoch_num):
-    """train the model
-
-    Args:
-        epoch_num (int): epoch number
-    """
-    global train_step
-
-    model.train()
-    start_time = time.time()
-    total_loss = 0
-    total_acc = 0
-    steps = 0
-    for batch_idx, data in enumerate(train_loader):
-        print(
-            "Epoch {} Step [{}/{}] ".format(epoch_num, batch_idx, len(train_loader)),
-            end="",
-        )
-
-        data = {key: value.to(device) for key, value in data.items()}
-
-        optimizer.zero_grad()
-
-        data["src_msk"] = data["src_msk"].bool()
-        data["tgt_msk"] = data["tgt_msk"].bool()
-
-        tgt_input_msk = data["tgt_msk"][:, :-1]
-        tgt_output_msk = data["tgt_msk"][:, 1:]
-
-        data["src"] = data["src"].permute(1, 0)
-        data["tgt"] = data["tgt"].permute(1, 0)
-        data["tgt_theme_msk"] = data["tgt_theme_msk"].permute(1, 0)
-
-        fullsong_input = data["tgt"][:-1, :]
-        fullsong_output = data["tgt"][1:, :]
-
-        att_msk = model.transformer_model.generate_square_subsequent_mask(
-            fullsong_input.shape[0]
-        ).to(device)
-
-        mem_msk = None
-
-        output = model(
-            src=data["src"],
-            tgt=fullsong_input,
-            tgt_mask=att_msk,
-            tgt_label=data["tgt_theme_msk"][:-1, :],
-            src_key_padding_mask=data["src_msk"],
-            tgt_key_padding_mask=tgt_input_msk,
-            memory_mask=mem_msk,
-        )
-
-        loss = criterion(output.view(-1, myvocab.n_tokens), fullsong_output.reshape(-1))
-
-        predict = output.view(-1, myvocab.n_tokens).argmax(dim=-1)
-
-        correct = predict.eq(fullsong_output.reshape(-1))
-
-        correct = torch.sum(correct * (~tgt_output_msk).reshape(-1).float()).item()
-
-        correct = correct / torch.sum((~tgt_output_msk).reshape(-1).float()).item()
-
-        total_acc += correct
-
-        print("Acc : {:.2f} ".format(correct), end="")
-
-        loss.backward()
-
-        torch.nn.utils.clip_grad_norm_(model.parameters(), args.clip)
-
-        optimizer.step()
-
-        if train_step < args.warmup_step:
-            curr_lr = args.lr * train_step / args.warmup_step
-            optimizer.param_groups[0]["lr"] = curr_lr
-        else:
-            scheduler.step()
-
-        total_loss += loss.item()
-
-        print(
-            "Loss : {:.2f} lr:{:.4f} ".format(
-                loss.item(), optimizer.param_groups[0]["lr"]
-            ),
-            end="\r",
-        )
-
-        steps += 1
-        train_step += 1
-
-    mylogger.log(
-        "Epoch {} lr:{:.4f} train_acc : {:.2f} train_loss : {:.2f}  time:{:.2f} ".format(
-            epoch_num,
-            optimizer.param_groups[0]["lr"],
-            total_acc / steps,
-            total_loss / steps,
-            time.time() - start_time,
-        ),
-        end="",
-    )
-
-
-def evalulate(epoch_num):
-    """evaluate validation set
-
-    Args:
-        epoch_num (int): epoch number
-    """
-    model.eval()
-    total_loss = 0
-    total_acc = 0
-    steps = 0
-    with torch.no_grad():
-        for batch_idx, data in enumerate(val_loader):
-            # print("Epoch {} Step {}/{} ".format( epoch_num,batch_idx,len(val_loader)),end='')
-            optimizer.zero_grad()
-
-            data = {key: value.to(device) for key, value in data.items()}
-
-            data["src_msk"] = data["src_msk"].bool()
-            data["tgt_msk"] = data["tgt_msk"].bool()
-
-            tgt_input_msk = data["tgt_msk"][:, :-1]
-            tgt_output_msk = data["tgt_msk"][:, 1:]
-
-            data["src"] = data["src"].permute(1, 0)
-            data["tgt"] = data["tgt"].permute(1, 0)
-            data["tgt_theme_msk"] = data["tgt_theme_msk"].permute(1, 0)
-
-            fullsong_input = data["tgt"][:-1, :]
-            fullsong_output = data["tgt"][1:, :]
-
-            att_msk = model.transformer_model.generate_square_subsequent_mask(
-                fullsong_input.shape[0]
-            ).to(device)
-
-            mem_msk = None
-
-            output = model(
-                src=data["src"],
-                tgt=fullsong_input,
-                tgt_mask=att_msk,
-                tgt_label=data["tgt_theme_msk"][:-1, :],
-                src_key_padding_mask=data["src_msk"],
-                tgt_key_padding_mask=tgt_input_msk,
-                memory_mask=mem_msk,
-            )
-
-            loss = criterion(
-                output.view(-1, myvocab.n_tokens), fullsong_output.reshape(-1)
-            )
-
-            predict = output.view(-1, myvocab.n_tokens).argmax(dim=-1)
-
-            correct = predict.eq(fullsong_output.reshape(-1))
-
-            correct = torch.sum(correct * (~tgt_output_msk).reshape(-1).float()).item()
-
-            correct = correct / torch.sum((~tgt_output_msk).reshape(-1).float()).item()
-
-            total_acc += correct
-
-            total_loss += loss.item()
-
-            steps += 1
-
-        mylogger.log(
-            "val_acc: {:.2f} val_loss : {:.2f}".format(
-                total_acc / steps, total_loss / steps
-            )
-        )
-
-
-start_epoch = 0
-
-if not args.restart_point == "":
-    start_epoch = int(args.restart_point.split("_")[-1].split(".")[0][2:]) + 1
-    mylogger.log("starting from epoch {}".format(start_epoch))
-
-max_epoch = 1
-mylogger.log("max epoch :{}".format(max_epoch))
-import time
-
-start = time.time()
-for i in range(start_epoch, max_epoch):
-    model.to(device)
-    train(i)
-    evalulate(i)
-    model.to(device_cpu)
-
-    if i % 10 == 0:
-        # save state dicts
-        torch.save(
-            model.state_dict(),
-            os.path.join(checkpoint_folder, "model_ep{}.pt".format(i)),
-        )
-        torch.save(
-            optimizer.state_dict(),
-            os.path.join(checkpoint_folder, "optimizer_ep{}.pt".format(i)),
-        )
-        torch.save(
-            scheduler.state_dict(),
-            os.path.join(checkpoint_folder, "scheduler_ep{}.pt".format(i)),
-        )
-
-print(f"Training time: {time.time() - start}, epochs={max_epoch}")
