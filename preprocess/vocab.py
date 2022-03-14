@@ -5,13 +5,12 @@
     Date: 2021/11/03
     
 """
-import pickle
-import numpy as np
-import miditoolkit
-import os
 import math
-from miditoolkit.midi import parser as mid_parser
+
+import miditoolkit
+import numpy as np
 from miditoolkit.midi import containers as ct
+from miditoolkit.midi import parser as mid_parser
 
 
 class Vocab(object):

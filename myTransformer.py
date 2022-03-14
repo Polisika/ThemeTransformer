@@ -7,16 +7,17 @@ Revised from pytorch transformer implementation
     Date: 2021/11/03
     
 """
-import torch
 import copy
 import math
+
+import torch
 from torch.nn import functional as F
-from torch.nn.modules.module import Module
+from torch.nn.init import xavier_uniform_
 from torch.nn.modules.activation import MultiheadAttention
 from torch.nn.modules.container import ModuleList
-from torch.nn.init import xavier_uniform_
 from torch.nn.modules.dropout import Dropout
 from torch.nn.modules.linear import Linear
+from torch.nn.modules.module import Module
 from torch.nn.modules.normalization import LayerNorm
 
 

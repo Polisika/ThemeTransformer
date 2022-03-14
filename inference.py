@@ -20,21 +20,15 @@ usage: inference.py [-h] [--model_path MODEL_PATH] --theme THEME
 """
 
 import argparse
+import json
+import os
+
 import numpy as np
 import torch
 import torch.optim
 
 from mymodel import myLM
-
-from preprocess.music_data import MusicDataset
-
 from preprocess.vocab import Vocab
-
-import time
-import os
-import pickle
-import json
-
 from randomness import set_global_random_seed
 
 parser = argparse.ArgumentParser()

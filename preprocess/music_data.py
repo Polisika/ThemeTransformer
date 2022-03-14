@@ -5,20 +5,16 @@
     Date: 2021/11/03
     
 """
-import torch
-from torch.utils.data.dataset import Dataset
-import sys, pickle
-import numpy as np
-from glob import glob
+import pickle
 from copy import deepcopy
 
+import numpy as np
 import preprocess.vocab
+import torch
+from torch.utils.data.dataset import Dataset
 
 # create vocab
 myvocab = preprocess.vocab.Vocab()
-
-
-import random
 
 
 class MusicDataset(Dataset):

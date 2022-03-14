@@ -19,25 +19,18 @@ usage: inference.py [-h] [--model_path MODEL_PATH] [--theme THEME]
     
 """
 device_str = "cuda:0"
+import os
 import shutil
-from torch.utils.data import DataLoader
-import numpy as np
+
 import torch
 import torch.optim
-
-from mymodel import myLM
-
-from preprocess.music_data import getMusicDataset
-
-from preprocess.vocab import Vocab
-
-from parse_arg import *
-
-import time
-import os
+from torch.utils.data import DataLoader
 
 import logger
-
+from mymodel import myLM
+from parse_arg import *
+from preprocess.music_data import getMusicDataset
+from preprocess.vocab import Vocab
 from randomness import set_global_random_seed
 
 # Set the random seed manually for reproducibility.

@@ -5,10 +5,12 @@
     Date: 2021/11/03
     
 """
-import torch.nn as nn
-import torch
 import math
+
 import numpy as np
+import torch
+import torch.nn as nn
+
 import myTransformer
 
 
