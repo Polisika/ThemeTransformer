@@ -67,8 +67,9 @@ class ThemeTransformer(pl.LightningModule):
         self.criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
 
     def configure_optimizers(self):
-        return [torch.optim.Adam(self.transformer.parameters(), lr=args.lr)], \
-               [torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.max_step, eta_min=args.lr_min)]
+        t = torch.optim.Adam(self.transformer.parameters(), lr=args.lr)
+        return [t], \
+               [torch.optim.lr_scheduler.CosineAnnealingLR(t, T_max=args.max_step, eta_min=args.lr_min)]
 
     def training_step(self, data, batch_idx):
         optimizer, scheduler = self.optimizers()
