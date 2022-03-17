@@ -18,20 +18,17 @@ usage: inference.py [-h] [--model_path MODEL_PATH] [--theme THEME]
     Date: 2021/11/03
     
 """
-from abc import ABC
 
+from pytorch_lightning import Trainer
 from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
 
 device_str = "cuda:0"
-import os
-import shutil
 
 import torch
 import torch.optim
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
 
-import logger
 from mymodel import myLM
 from parse_arg import *
 from preprocess.music_data import getMusicDataset
@@ -40,17 +37,25 @@ from randomness import set_global_random_seed
 
 
 class ThemeTransformer(pl.LightningModule):
-    def test_dataloader(self) -> EVAL_DATALOADERS:
-        pass
-
     def val_dataloader(self) -> EVAL_DATALOADERS:
-        pass
-
-    def predict_dataloader(self) -> EVAL_DATALOADERS:
-        pass
+        val_dataset = getMusicDataset(
+            pkl_path="data_pkl/val_seg2_512.pkl", args=args, vocab=myvocab
+        )
+        val_loader = DataLoader(dataset=val_dataset, batch_size=2, shuffle=False, num_workers=0)
+        return val_loader
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
-        pass
+        # dataset
+        train_dataset = getMusicDataset(
+            pkl_path="data_pkl/train_seg2_512.pkl", args=args, vocab=myvocab
+        )
+        train_loader = DataLoader(
+            dataset=train_dataset,
+            batch_size=8,  # args.batch_size,
+            shuffle=True,
+            num_workers=0,
+        )
+        return train_loader
 
     def __init__(self, vocab, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
         super().__init__()
@@ -72,8 +77,8 @@ class ThemeTransformer(pl.LightningModule):
                [torch.optim.lr_scheduler.CosineAnnealingLR(t, T_max=args.max_step, eta_min=args.lr_min)]
 
     def training_step(self, data, batch_idx):
-        optimizer, scheduler = self.optimizers()
-        optimizer, scheduler = optimizer[0], scheduler[0]
+        optimizer = self.optimizers()
+        scheduler = self.lr_schedulers()
         optimizer.zero_grad()
 
         data["src_msk"] = data["src_msk"].bool()
@@ -93,8 +98,6 @@ class ThemeTransformer(pl.LightningModule):
             fullsong_input.shape[0]
         )
 
-        mem_msk = None
-
         output = self.transformer(
             src=data["src"],
             tgt=fullsong_input,
@@ -102,7 +105,7 @@ class ThemeTransformer(pl.LightningModule):
             tgt_label=data["tgt_theme_msk"][:-1, :],
             src_key_padding_mask=data["src_msk"],
             tgt_key_padding_mask=tgt_input_msk,
-            memory_mask=mem_msk,
+            memory_mask=None,
         )
 
         loss = self.criterion(output.view(-1, self.vocab.n_tokens), fullsong_output.reshape(-1))
@@ -128,7 +131,7 @@ class ThemeTransformer(pl.LightningModule):
 
         self.total_loss += loss.item()
 
-        _curr_lr = optimizer.param_groups[0]["lr"]
+        curr_lr = optimizer.param_groups[0]["lr"]
         print(
             "Loss : {:.2f} lr:{:.4f} ".format(
                 loss.item(), curr_lr
@@ -161,8 +164,6 @@ class ThemeTransformer(pl.LightningModule):
             fullsong_input.shape[0]
         )
 
-        mem_msk = None
-
         output = self.transformer(
             src=data["src"],
             tgt=fullsong_input,
@@ -170,7 +171,7 @@ class ThemeTransformer(pl.LightningModule):
             tgt_label=data["tgt_theme_msk"][:-1, :],
             src_key_padding_mask=data["src_msk"],
             tgt_key_padding_mask=tgt_input_msk,
-            memory_mask=mem_msk,
+            memory_mask=None,
         )
 
         loss = self.criterion(
@@ -193,66 +194,6 @@ set_global_random_seed(args.seed)
 # create vocab
 myvocab = Vocab()
 
-# create directory for training purpose
-os.makedirs("./ckpts", exist_ok=True)
-os.makedirs("./logs", exist_ok=True)
-
-# create work directory
-while 1:
-    exp_name = input("Enter exp name : ")
-    if os.path.exists(os.path.join("./ckpts", exp_name)):
-        ans = input("work dir exists! overwrite? [Y/N]:")
-        if ans.lower() == "y":
-            break
-    else:
-        break
-
-os.makedirs(os.path.join("./ckpts/", exp_name), exist_ok=True)
-os.makedirs(os.path.join("./ckpts/", exp_name, "script"), exist_ok=True)
-os.makedirs(os.path.join("./ckpts/", exp_name, "script", "preprocess"), exist_ok=True)
-os.makedirs(os.path.join("./ckpts/", exp_name, "log"), exist_ok=True)
-
-checkpoint_folder = "./ckpts/{}".format(exp_name)
-# copy scripts
-file_to_save = [
-    "train.py",
-    "inference.py",
-    "myTransformer.py",
-    "randomness.py",
-    "parse_arg.py",
-    "mymodel.py",
-    "preprocess/vocab.py",
-    "preprocess/music_data.py",
-]
-for x in file_to_save:
-    shutil.copyfile(x, os.path.join(checkpoint_folder, "script", x))
-
-# create logger for log
-mylogger = logger.logger(
-    filepath=os.path.join(checkpoint_folder, "log/log_{}.txt".format(exp_name)),
-    overrite=True,
-)
-if os.path.exists("logs/log_{}.txt".format(exp_name)):
-    os.remove("logs/log_{}.txt".format(exp_name))
-os.link(mylogger.filepath, "logs/log_{}.txt".format(exp_name))
-
-
-# dataset
-train_dataset = getMusicDataset(
-    pkl_path="data_pkl/train_seg2_512.pkl", args=args, vocab=myvocab
-)
-
-
-val_dataset = getMusicDataset(
-    pkl_path="data_pkl/val_seg2_512.pkl", args=args, vocab=myvocab
-)
-
-
-train_loader = DataLoader(
-    dataset=train_dataset,
-    batch_size=64,  # args.batch_size,
-    shuffle=True,
-    num_workers=4,
-)
-
-val_loader = DataLoader(dataset=val_dataset, batch_size=2, shuffle=False, num_workers=4)
+model = ThemeTransformer(myvocab)
+trainer = Trainer(gpus=8)
+trainer.fit(model)
