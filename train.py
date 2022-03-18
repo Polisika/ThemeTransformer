@@ -51,7 +51,7 @@ class ThemeTransformer(pl.LightningModule):
         )
         train_loader = DataLoader(
             dataset=train_dataset,
-            batch_size=64,  # args.batch_size,
+            batch_size=8 * 7,  # args.batch_size, -- 8 default * 7 gpus
             shuffle=True,
             num_workers=4,
         )
