@@ -196,6 +196,6 @@ if __name__ == '__main__':
     myvocab = Vocab()
 
     model = ThemeTransformer(myvocab)
-    trainer = Trainer(devices=list(range(1, 8)), accelerator='gpu', strategy="dp", max_epochs=10)
+    trainer = Trainer(devices=list(range(1, 8)), accelerator='gpu', strategy="ddp", max_epochs=10)
     trainer.fit(model)
     trainer.save_checkpoint("model")
