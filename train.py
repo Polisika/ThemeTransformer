@@ -96,7 +96,7 @@ class ThemeTransformer(pl.LightningModule):
 
         att_msk = self.transformer.transformer_model.generate_square_subsequent_mask(
             fullsong_input.shape[0]
-        ).type_as(data["src"])
+        ).to(self.device)
 
         output = self.transformer(
             src=data["src"],
@@ -162,7 +162,7 @@ class ThemeTransformer(pl.LightningModule):
 
         att_msk = self.transformer.transformer_model.generate_square_subsequent_mask(
             fullsong_input.shape[0]
-        ).type_as(data["src"])
+        ).to(self.device)
 
         output = self.transformer(
             src=data["src"],
