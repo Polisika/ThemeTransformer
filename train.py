@@ -191,9 +191,11 @@ class ThemeTransformer(pl.LightningModule):
 # Set the random seed manually for reproducibility.
 set_global_random_seed(args.seed)
 
-# create vocab
-myvocab = Vocab()
+if __name__ == '__main__':
+    # create vocab
+    myvocab = Vocab()
 
-model = ThemeTransformer(myvocab)
-trainer = Trainer(gpus=8)
-trainer.fit(model)
+    model = ThemeTransformer(myvocab)
+    trainer = Trainer(gpus=8)
+    trainer.fit(model)
+    trainer.save_checkpoint("model")
