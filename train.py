@@ -41,7 +41,7 @@ class ThemeTransformer(pl.LightningModule):
         val_dataset = getMusicDataset(
             pkl_path="data_pkl/val_seg2_512.pkl", args=args, vocab=self.vocab
         )
-        val_loader = DataLoader(dataset=val_dataset, batch_size=8, shuffle=False, num_workers=4)
+        val_loader = DataLoader(dataset=val_dataset, batch_size=16, shuffle=False, num_workers=4)
         return val_loader
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
