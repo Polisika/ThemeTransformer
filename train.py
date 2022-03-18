@@ -96,7 +96,7 @@ class ThemeTransformer(pl.LightningModule):
 
         att_msk = self.transformer.transformer_model.generate_square_subsequent_mask(
             fullsong_input.shape[0]
-        )
+        ).to(self.device)
 
         output = self.transformer(
             src=data["src"],
@@ -162,7 +162,7 @@ class ThemeTransformer(pl.LightningModule):
 
         att_msk = self.transformer.transformer_model.generate_square_subsequent_mask(
             fullsong_input.shape[0]
-        )
+        ).to(self.device)
 
         output = self.transformer(
             src=data["src"],
@@ -195,5 +195,5 @@ set_global_random_seed(args.seed)
 myvocab = Vocab()
 
 model = ThemeTransformer(myvocab)
-trainer = Trainer(gpus=8)
+trainer = Trainer(gpus=1)
 trainer.fit(model)
