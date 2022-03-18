@@ -39,7 +39,7 @@ from randomness import set_global_random_seed
 class ThemeTransformer(pl.LightningModule):
     def val_dataloader(self) -> EVAL_DATALOADERS:
         val_dataset = getMusicDataset(
-            pkl_path="data_pkl/val_seg2_512.pkl", args=args, vocab=myvocab
+            pkl_path="data_pkl/val_seg2_512.pkl", args=args, vocab=self.vocab
         )
         val_loader = DataLoader(dataset=val_dataset, batch_size=2, shuffle=False, num_workers=0)
         return val_loader
@@ -47,7 +47,7 @@ class ThemeTransformer(pl.LightningModule):
     def train_dataloader(self) -> TRAIN_DATALOADERS:
         # dataset
         train_dataset = getMusicDataset(
-            pkl_path="data_pkl/train_seg2_512.pkl", args=args, vocab=myvocab
+            pkl_path="data_pkl/train_seg2_512.pkl", args=args, vocab=self.vocab
         )
         train_loader = DataLoader(
             dataset=train_dataset,
