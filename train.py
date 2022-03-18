@@ -96,7 +96,7 @@ class ThemeTransformer(pl.LightningModule):
 
         att_msk = self.transformer.transformer_model.generate_square_subsequent_mask(
             fullsong_input.shape[0]
-        ).to(self.device)
+        ).type_as(data["src"])
 
         output = self.transformer(
             src=data["src"],
@@ -140,8 +140,8 @@ class ThemeTransformer(pl.LightningModule):
         )
 
         self.train_step += 1
-        self.log('train_loss', loss)
-        self.log('lr', curr_lr)
+        self.log('train_loss', loss, sync_dist=True)
+        self.log('lr', curr_lr, sync_dist=True)
 
     def validation_step(self, data, batch_idx):
         optimizer = self.optimizers()
@@ -162,7 +162,7 @@ class ThemeTransformer(pl.LightningModule):
 
         att_msk = self.transformer.transformer_model.generate_square_subsequent_mask(
             fullsong_input.shape[0]
-        ).to(self.device)
+        ).type_as(data["src"])
 
         output = self.transformer(
             src=data["src"],
@@ -185,7 +185,7 @@ class ThemeTransformer(pl.LightningModule):
 
         self.total_acc += correct
         self.total_loss += loss.item()
-        self.log('val_loss', loss)
+        self.log('val_loss', loss, sync_dist=True)
 
 
 # Set the random seed manually for reproducibility.
@@ -196,6 +196,6 @@ if __name__ == '__main__':
     myvocab = Vocab()
 
     model = ThemeTransformer(myvocab)
-    trainer = Trainer(devices=list(range(1, 8)), accelerator='gpu', strategy="ddp")
+    trainer = Trainer(devices=list(range(1, 8)), accelerator='gpu', strategy="dp")
     trainer.fit(model)
     trainer.save_checkpoint("model")
