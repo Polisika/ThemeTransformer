@@ -78,7 +78,7 @@ if not args.seed == -1:
 myvocab = Vocab()
 
 # devices
-device = torch.device("cuda:0" if args.cuda else "cpu")
+device = torch.device("cuda:0")  # if args.cuda else "cpu")
 device_cpu = torch.device("cpu")
 
 
