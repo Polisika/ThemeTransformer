@@ -31,6 +31,8 @@ from mymodel import myLM
 from preprocess.vocab import Vocab
 from randomness import set_global_random_seed
 
+from model_definition import ThemeTransformer
+
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--model_path",
@@ -83,13 +85,9 @@ device_cpu = torch.device("cpu")
 
 
 # model definition
-model = myLM(
-    myvocab.n_tokens, d_model=256, num_encoder_layers=6, xorpattern=[0, 0, 0, 1, 1, 1]
-)
-
 print("Loading model from {}".format(args.model_path))
-model.load_state_dict(torch.load(args.model_path))
 print("Using device {}".format(device))
+model = ThemeTransformer.load_from_checkpoint(args.model_path)
 
 
 def inference(n_bars, strategies, params, theme_seq, prompt=None):
@@ -111,10 +109,8 @@ def inference(n_bars, strategies, params, theme_seq, prompt=None):
     word2event = myvocab.id2token
 
     initial_flag, initial_cnt = True, 0
-    generated_bars = 0
 
     fail_cnt = 0
-    subbeats_accumulate = 0
 
     input_theme = torch.tensor(theme_seq)
     input_theme = input_theme.reshape((-1, 1))
@@ -123,10 +119,6 @@ def inference(n_bars, strategies, params, theme_seq, prompt=None):
     label_list = []
 
     previous_labeled = False
-
-    last_theme_bar_idx = -1
-
-    new_motif_tmp_array = []
 
     bar_count = 0
     position_anchor = -1
@@ -187,7 +179,7 @@ def inference(n_bars, strategies, params, theme_seq, prompt=None):
             input_x = input_x.reshape((-1, 1))
             label_input = label_input.reshape((-1, 1))
 
-            input_x_att_msk = model.transformer_model.generate_square_subsequent_mask(
+            input_x_att_msk = model.transformer.transformer_model.generate_square_subsequent_mask(
                 input_x.shape[0]
             )
             input_x = input_x.to(device)
@@ -206,13 +198,13 @@ def inference(n_bars, strategies, params, theme_seq, prompt=None):
 
             # temperature or not
             if "temperature" in strategies:
-                probs = model.temperature(logits=logits, temperature=params["t"])
+                probs = model.transformer.temperature(logits=logits, temperature=params["t"])
             else:
-                probs = model.temperature(logits=logits, temperature=1.0)
+                probs = model.transformer.temperature(logits=logits, temperature=1.0)
 
             # sampling
             # word : the generated remi event
-            word = model.nucleus(probs=probs, p=params["p"])
+            word = model.transformer.nucleus(probs=probs, p=params["p"])
 
             print("Generated new remi word {}".format(myvocab.id2token[word]))
             # skip padding
@@ -364,47 +356,47 @@ def inference(n_bars, strategies, params, theme_seq, prompt=None):
     return words[0]
 
 
-# load tempo information
-with open("./tempo_dict.json") as f:
-    tempo_dict = json.load(f)
+if __name__ == "__main__":
+    # load tempo information
+    with open("./tempo_dict.json") as f:
+        tempo_dict = json.load(f)
 
-given_theme = myvocab.midi2REMI(args.theme, theme_annotations=False)
-given_theme = (
-    [myvocab.token2id["Theme_Start"]] + given_theme + [myvocab.token2id["Theme_End"]]
-)
+    given_theme = myvocab.midi2REMI(args.theme, theme_annotations=False)
+    given_theme = (
+        [myvocab.token2id["Theme_Start"]] + given_theme + [myvocab.token2id["Theme_End"]]
+    )
 
+    midiID = os.path.basename(args.theme).split(".")[0].split("_")[0]
+    print("Tempo from original : {}".format(tempo_dict[midiID]))
+    tmp = myvocab._tempo_bins[np.argmin(abs(tempo_dict[midiID] - myvocab._tempo_bins))]
+    given_tempo = myvocab.token2id["Tempo_{}".format(tmp)]
 
-midiID = os.path.basename(args.theme).split(".")[0].split("_")[0]
-print("Tempo from original : {}".format(tempo_dict[midiID]))
-tmp = myvocab._tempo_bins[np.argmin(abs(tempo_dict[midiID] - myvocab._tempo_bins))]
-given_tempo = myvocab.token2id["Tempo_{}".format(tmp)]
+    tempo_in_theme = [x for x in given_theme if myvocab.id2token[x].startswith("Tempo")]
+    if not len(tempo_in_theme) == 0:
+        # remove error tempo
+        given_theme = [
+            x for x in given_theme if not myvocab.id2token[x].startswith("Tempo")
+        ]
 
-tempo_in_theme = [x for x in given_theme if myvocab.id2token[x].startswith("Tempo")]
-if not len(tempo_in_theme) == 0:
-    # remove error tempo
-    given_theme = [
-        x for x in given_theme if not myvocab.id2token[x].startswith("Tempo")
+    model.to(device)
+    word_seq = inference(
+        n_bars=args.nbars,
+        strategies=["temperature", "nucleus"],
+        params={"t": args.temp, "p": 0.9},
+        theme_seq=given_theme,
+        prompt=[given_tempo, myvocab.token2id["Theme_Start"]],
+    )
+
+    # check if no tempo in front , add it
+    position_events = [
+        i for i, x in enumerate(word_seq) if myvocab.id2token[x].startswith("Position")
     ]
+    if not word_seq[position_events[0] + 1] == given_tempo:
+        word_seq.insert(position_events[0] + 1, given_tempo)
 
-model.to(device)
-word_seq = inference(
-    n_bars=args.nbars,
-    strategies=["temperature", "nucleus"],
-    params={"t": args.temp, "p": 0.9},
-    theme_seq=given_theme,
-    prompt=[given_tempo, myvocab.token2id["Theme_Start"]],
-)
+    # remove tempo
+    word_seq = word_seq[1:]
 
-# check if no tempo in front , add it
-position_events = [
-    i for i, x in enumerate(word_seq) if myvocab.id2token[x].startswith("Position")
-]
-if not word_seq[position_events[0] + 1] == given_tempo:
-    word_seq.insert(position_events[0] + 1, given_tempo)
-
-# remove tempo
-word_seq = word_seq[1:]
-
-# save to disk
-myvocab.REMIID2midi(word_seq, args.out_midi)
-print("{} saved".format(args.out_midi))
+    # save to disk
+    myvocab.REMIID2midi(word_seq, args.out_midi)
+    print("{} saved".format(args.out_midi))
