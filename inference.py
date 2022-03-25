@@ -101,7 +101,7 @@ def inference(n_bars, strategies, params, theme_seq, prompt=None):
     Returns:
         list: token sequence of generated music
     """
-    model.eval()
+    model.transformer.eval()
     words = [[]]
 
     word2event = myvocab.id2token
@@ -184,7 +184,7 @@ def inference(n_bars, strategies, params, theme_seq, prompt=None):
             label_input = label_input.to(device)
             input_x_att_msk = input_x_att_msk.to(device)
 
-            logits = model(
+            logits = model.transformer(
                 src=input_theme,
                 tgt=input_x,
                 tgt_label=label_input,
