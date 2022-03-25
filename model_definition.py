@@ -4,12 +4,11 @@ from pytorch_lightning.utilities.types import EVAL_DATALOADERS, TRAIN_DATALOADER
 from torch.utils.data import DataLoader
 
 from mymodel import myLM
-from parse_arg import args
 from preprocess.music_data import getMusicDataset
 
 
 class ThemeTransformer(pl.LightningModule):
-    def __init__(self, vocab, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
+    def __init__(self, vocab, args, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
         super().__init__()
         self.transformer = myLM(vocab.n_tokens,
                                 d_model=d_model,
@@ -19,13 +18,14 @@ class ThemeTransformer(pl.LightningModule):
         self.total_loss = 0
         self.train_step = 0
         self.vocab = vocab
+        self.args = args
 
         self.automatic_optimization = False
         self.criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
         val_dataset = getMusicDataset(
-            pkl_path="data_pkl/val_seg2_512.pkl", args=args, vocab=self.vocab
+            pkl_path="data_pkl/val_seg2_512.pkl", args=self.args, vocab=self.vocab
         )
         val_loader = DataLoader(dataset=val_dataset, batch_size=31, shuffle=False, num_workers=4)
         return val_loader
@@ -33,7 +33,7 @@ class ThemeTransformer(pl.LightningModule):
     def train_dataloader(self) -> TRAIN_DATALOADERS:
         # dataset
         train_dataset = getMusicDataset(
-            pkl_path="data_pkl/train_seg2_512.pkl", args=args, vocab=self.vocab
+            pkl_path="data_pkl/train_seg2_512.pkl", args=self.args, vocab=self.vocab
         )
         train_loader = DataLoader(
             dataset=train_dataset,
@@ -44,9 +44,9 @@ class ThemeTransformer(pl.LightningModule):
         return train_loader
 
     def configure_optimizers(self):
-        t = torch.optim.Adam(self.transformer.parameters(), lr=args.lr)
+        t = torch.optim.Adam(self.transformer.parameters(), lr=self.args.lr)
         return [t], \
-               [torch.optim.lr_scheduler.CosineAnnealingLR(t, T_max=args.max_step, eta_min=args.lr_min)]
+               [torch.optim.lr_scheduler.CosineAnnealingLR(t, T_max=self.args.max_step, eta_min=self.args.lr_min)]
 
     def training_step(self, data, batch_idx):
         optimizer = self.optimizers()
@@ -94,11 +94,11 @@ class ThemeTransformer(pl.LightningModule):
         print("Acc : {:.2f} ".format(correct), end="")
 
         self.manual_backward(loss)
-        torch.nn.utils.clip_grad_norm_(self.transformer.parameters(), args.clip)
+        torch.nn.utils.clip_grad_norm_(self.transformer.parameters(), self.args.clip)
         optimizer.step()
 
-        if self.train_step < args.warmup_step:
-            curr_lr = args.lr * self.train_step / args.warmup_step
+        if self.train_step < self.args.warmup_step:
+            curr_lr = self.args.lr * self.train_step / self.args.warmup_step
             optimizer.param_groups[0]["lr"] = curr_lr
         else:
             scheduler.step()

@@ -18,25 +18,26 @@ usage: inference.py [-h] [--model_path MODEL_PATH] [--theme THEME]
     Date: 2021/11/03
     
 """
+import time
 
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 
 from ThemeTransformer.model_definition import ThemeTransformer
 
-from parse_arg import *
 from preprocess.vocab import Vocab
 from randomness import set_global_random_seed
 
 # Set the random seed manually for reproducibility.
-set_global_random_seed(args.seed)
 
 if __name__ == '__main__':
-    import time
+    from parse_arg import args
+
+    set_global_random_seed(args.seed)
     # create vocab
     myvocab = Vocab()
 
-    model = ThemeTransformer(myvocab)
+    model = ThemeTransformer(myvocab, args)
     epochs = 15000
     logger = TensorBoardLogger("tensor_board_logs", name=f"model_epochs={epochs}")
     trainer = Trainer(devices=list(range(1, 8)),
