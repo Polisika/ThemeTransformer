@@ -3,13 +3,16 @@ import torch
 from pytorch_lightning.utilities.types import EVAL_DATALOADERS, TRAIN_DATALOADERS
 from torch.utils.data import DataLoader
 
+from preprocess.vocab import Vocab
 from mymodel import myLM
 from preprocess.music_data import getMusicDataset
+from parse_arg import DefaultTrainArgs
 
 
 class ThemeTransformer(pl.LightningModule):
-    def __init__(self, vocab, args, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
+    def __init__(self, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
         super().__init__()
+        vocab = Vocab()
         self.transformer = myLM(vocab.n_tokens,
                                 d_model=d_model,
                                 num_encoder_layers=num_encoder_layers,
@@ -18,7 +21,7 @@ class ThemeTransformer(pl.LightningModule):
         self.total_loss = 0
         self.train_step = 0
         self.vocab = vocab
-        self.args = args
+        self.args = DefaultTrainArgs()
 
         self.automatic_optimization = False
         self.criterion = torch.nn.CrossEntropyLoss(ignore_index=0)

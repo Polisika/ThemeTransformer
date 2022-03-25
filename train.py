@@ -27,11 +27,11 @@ from ThemeTransformer.model_definition import ThemeTransformer
 
 from preprocess.vocab import Vocab
 from randomness import set_global_random_seed
-
+from parse_arg import get_args
 # Set the random seed manually for reproducibility.
 
 if __name__ == '__main__':
-    from parse_arg import args
+    args = get_args()
 
     set_global_random_seed(args.seed)
     # create vocab
