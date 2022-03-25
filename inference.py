@@ -36,14 +36,13 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--model_path",
     type=str,
-    default="./trained_model/model_ep2311.pt",
+    default="model_15000_epochs.ckpt",
     help="model file",
 )
 
 parser.add_argument(
     "--theme",
     type=str,
-    required=True,
     default="./theme_files/874_theme.mid",
     help="theme file",
 )
