@@ -27,7 +27,6 @@ import numpy as np
 import torch
 import torch.optim
 
-from mymodel import myLM
 from preprocess.vocab import Vocab
 from randomness import set_global_random_seed
 

@@ -3,9 +3,9 @@ import torch
 from pytorch_lightning.utilities.types import EVAL_DATALOADERS, TRAIN_DATALOADERS
 from torch.utils.data import DataLoader
 
-from ThemeTransformer.mymodel import myLM
-from ThemeTransformer.parse_arg import args
-from ThemeTransformer.preprocess.music_data import getMusicDataset
+from mymodel import myLM
+from parse_arg import args
+from preprocess.music_data import getMusicDataset
 
 
 class ThemeTransformer(pl.LightningModule):
