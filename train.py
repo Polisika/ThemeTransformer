@@ -37,7 +37,7 @@ if __name__ == '__main__':
     # create vocab
     myvocab = Vocab()
 
-    model = ThemeTransformer(myvocab, args)
+    model = ThemeTransformer()#args)
     epochs = 15000
     logger = TensorBoardLogger("tensor_board_logs", name=f"model_epochs={epochs}")
     trainer = Trainer(devices=[2, 3],
