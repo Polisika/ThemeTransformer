@@ -40,13 +40,14 @@ if __name__ == '__main__':
     model = ThemeTransformer(myvocab, args)
     epochs = 15000
     logger = TensorBoardLogger("tensor_board_logs", name=f"model_epochs={epochs}")
-    trainer = Trainer(devices=list(range(1, 8)),
+    trainer = Trainer(devices=[2, 3],
                       accelerator='gpu',
                       strategy="ddp",
                       max_epochs=epochs,
                       enable_checkpointing=True,
                       check_val_every_n_epoch=10,
-                      log_every_n_steps=10)
+                      log_every_n_steps=10,
+                      logger=logger)
     start = time.time()
     trainer.fit(model)
     trainer.save_checkpoint(f"model_{epochs}_epochs.ckpt")
