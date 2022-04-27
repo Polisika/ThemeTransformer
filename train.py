@@ -23,7 +23,7 @@ import time
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from ThemeTransformer.model_definition import ThemeTransformer
+from model_definition import ThemeTransformer
 
 from preprocess.vocab import Vocab
 from randomness import set_global_random_seed
