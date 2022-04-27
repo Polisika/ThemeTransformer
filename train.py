@@ -40,7 +40,7 @@ if __name__ == '__main__':
     model = ThemeTransformer()#args)
     epochs = 15000
     logger = TensorBoardLogger("tensor_board_logs", name=f"model_epochs={epochs}")
-    trainer = Trainer(devices=[3, 4, 7],
+    trainer = Trainer(devices=[4, 7],
                       accelerator='gpu',
                       strategy="ddp",
                       max_epochs=epochs,
