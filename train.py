@@ -42,7 +42,6 @@ if __name__ == '__main__':
     logger = TensorBoardLogger("tensor_board_logs", name=f"model_epochs={epochs}")
     trainer = Trainer(devices=4,
                       accelerator='gpu',
-                      gpus=1,
                       #strategy="ddp",
                       max_epochs=epochs,
                       enable_checkpointing=True,
