@@ -121,8 +121,8 @@ class ThemeTransformer(pl.LightningModule):
         self.log('lr', curr_lr, sync_dist=True)
 
         return {
-            "loss": loss.item(),
-            "log": {"train_loss": loss.item(), "total_acc": self.total_acc},
+            "loss": loss,
+            "log": {"train_loss": loss, "total_acc": self.total_acc},
             "lr": curr_lr
         }
 
