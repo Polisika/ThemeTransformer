@@ -22,6 +22,7 @@ import time
 
 from pytorch_lightning import Trainer
 from pytorch_lightning.loggers import TensorBoardLogger
+import torch
 
 from model_definition import ThemeTransformer
 
@@ -40,7 +41,8 @@ if __name__ == '__main__':
     model = ThemeTransformer()#args)
     epochs = 15000
     logger = TensorBoardLogger("tensor_board_logs", name=f"model_epochs={epochs}")
-    trainer = Trainer(devices=[0,1,2,3,4,5,6,7],
+    torch.set_num_threads(1)
+    trainer = Trainer(devices=[4, 7],
                       accelerator='gpu',
                       strategy="ddp",
                       max_epochs=epochs,
