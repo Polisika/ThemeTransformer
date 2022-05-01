@@ -10,7 +10,7 @@ from parse_arg import DefaultTrainArgs
 
 
 class ThemeTransformer(pl.LightningModule):
-    def __init__(self, batch_size=64, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
+    def __init__(self, batch_size=80, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
         super().__init__()
         vocab = Vocab()
         self.transformer = myLM(vocab.n_tokens,
