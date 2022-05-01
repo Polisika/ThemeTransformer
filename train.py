@@ -41,7 +41,7 @@ if __name__ == '__main__':
     model = ThemeTransformer()#args)
     epochs = 15000
     logger = TensorBoardLogger("tensor_board_logs", name=f"model_epochs={epochs}")
-    torch.set_num_threads(4)
+    torch.set_num_threads(5)
     trainer = Trainer(devices=[4, 7],
                       accelerator='gpu',
                       strategy="ddp",
