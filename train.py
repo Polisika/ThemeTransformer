@@ -50,7 +50,8 @@ if __name__ == '__main__':
                       check_val_every_n_epoch=10,
                       log_every_n_steps=10,
                       logger=logger,
-                      resume_from_checkpoint=args.restart_point if args.restart_point else None)
+                      resume_from_checkpoint=args.restart_point if args.restart_point else None,
+                      auto_scale_batch_size=True)
     start = time.time()
     trainer.fit(model)
     trainer.save_checkpoint(f"model_{epochs}_epochs.ckpt")

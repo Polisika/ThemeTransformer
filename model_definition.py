@@ -10,7 +10,7 @@ from parse_arg import DefaultTrainArgs
 
 
 class ThemeTransformer(pl.LightningModule):
-    def __init__(self, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
+    def __init__(self, batch_size=64, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
         super().__init__()
         vocab = Vocab()
         self.transformer = myLM(vocab.n_tokens,
@@ -25,12 +25,13 @@ class ThemeTransformer(pl.LightningModule):
 
         self.automatic_optimization = False
         self.criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
+        self.batch_size = batch_size
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
         val_dataset = getMusicDataset(
             pkl_path="data_pkl/val_seg2_512.pkl", args=self.args, vocab=self.vocab
         )
-        val_loader = DataLoader(dataset=val_dataset, batch_size=32, shuffle=False, num_workers=4)
+        val_loader = DataLoader(dataset=val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=4)
         return val_loader
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
@@ -40,7 +41,7 @@ class ThemeTransformer(pl.LightningModule):
         )
         train_loader = DataLoader(
             dataset=train_dataset,
-            batch_size=64,  # args.batch_size, -- 8 default * 7 gpus
+            batch_size=self.batch_size,  # args.batch_size, -- 8 default * 7 gpus
             shuffle=True,
             num_workers=4,
         )
