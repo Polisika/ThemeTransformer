@@ -13,7 +13,7 @@ class ThemeTransformer(pl.LightningModule):
     def __init__(self, batch_size=64, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
         super().__init__()
         vocab = Vocab()
-        self.transformer = myLM(vocab.n_tokens,
+        self.model = myLM(vocab.n_tokens,
                                 d_model=d_model,
                                 num_encoder_layers=num_encoder_layers,
                                 xorpattern=xorpattern)
@@ -49,7 +49,7 @@ class ThemeTransformer(pl.LightningModule):
         return train_loader
 
     def configure_optimizers(self):
-        t = torch.optim.Adam(self.transformer.parameters(), lr=self.learning_rate)
+        t = torch.optim.Adam(self.model.parameters(), lr=(self.lr or self.learning_rate))
         return [t], \
                [torch.optim.lr_scheduler.CosineAnnealingLR(t, T_max=self.args.max_step, eta_min=self.args.lr_min)]
     
@@ -71,11 +71,11 @@ class ThemeTransformer(pl.LightningModule):
         fullsong_input = data["tgt"][:-1, :]
         fullsong_output = data["tgt"][1:, :]
 
-        att_msk = self.transformer.transformer_model.generate_square_subsequent_mask(
+        att_msk = self.model.transformer_model.generate_square_subsequent_mask(
             fullsong_input.shape[0]
         ).to(self.device)
 
-        output = self.transformer(
+        output = self.model(
             src=data["src"],
             tgt=fullsong_input,
             tgt_mask=att_msk,
@@ -104,11 +104,11 @@ class ThemeTransformer(pl.LightningModule):
         fullsong_input = data["tgt"][:-1, :]
         fullsong_output = data["tgt"][1:, :]
 
-        att_msk = self.transformer.transformer_model.generate_square_subsequent_mask(
+        att_msk = self.model.transformer_model.generate_square_subsequent_mask(
             fullsong_input.shape[0]
         ).to(self.device)
 
-        output = self.transformer(
+        output = self.model(
             src=data["src"],
             tgt=fullsong_input,
             tgt_mask=att_msk,
@@ -132,7 +132,7 @@ class ThemeTransformer(pl.LightningModule):
         print("Acc : {:.2f} ".format(correct), end="")
 
         self.manual_backward(loss)
-        torch.nn.utils.clip_grad_norm_(self.transformer.parameters(), self.args.clip)
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip)
         optimizer.step()
 
         self.total_loss += loss.item()
@@ -163,11 +163,11 @@ class ThemeTransformer(pl.LightningModule):
         fullsong_input = data["tgt"][:-1, :]
         fullsong_output = data["tgt"][1:, :]
 
-        att_msk = self.transformer.transformer_model.generate_square_subsequent_mask(
+        att_msk = self.model.transformer_model.generate_square_subsequent_mask(
             fullsong_input.shape[0]
         ).to(self.device)
 
-        output = self.transformer(
+        output = self.model(
             src=data["src"],
             tgt=fullsong_input,
             tgt_mask=att_msk,
