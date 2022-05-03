@@ -10,10 +10,10 @@ from parse_arg import DefaultTrainArgs
 
 
 class ThemeTransformer(pl.LightningModule):
-    def __init__(self, learning_rate=0.0001, batch_size=64, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
+    def __init__(self, batch_size=64, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
         super().__init__()
         vocab = Vocab()
-        self.model = myLM(vocab.n_tokens,
+        self.transformer = myLM(vocab.n_tokens,
                                 d_model=d_model,
                                 num_encoder_layers=num_encoder_layers,
                                 xorpattern=xorpattern)
@@ -26,7 +26,6 @@ class ThemeTransformer(pl.LightningModule):
         self.automatic_optimization = False
         self.criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
         self.batch_size = batch_size
-        self.learning_rate = learning_rate
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
         val_dataset = getMusicDataset(
@@ -49,43 +48,10 @@ class ThemeTransformer(pl.LightningModule):
         return train_loader
 
     def configure_optimizers(self):
-        t = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        t = torch.optim.Adam(self.transformer.parameters(), lr=self.args.lr)
         return [t], \
                [torch.optim.lr_scheduler.CosineAnnealingLR(t, T_max=self.args.max_step, eta_min=self.args.lr_min)]
-    
-    def forward(self, data, batch_idx):
-        optimizer = self.optimizers()
-        scheduler = self.lr_schedulers()
-        optimizer.zero_grad()
 
-        data["src_msk"] = data["src_msk"].bool()
-        data["tgt_msk"] = data["tgt_msk"].bool()
-
-        tgt_input_msk = data["tgt_msk"][:, :-1]
-        tgt_output_msk = data["tgt_msk"][:, 1:]
-
-        data["src"] = data["src"].permute(1, 0)
-        data["tgt"] = data["tgt"].permute(1, 0)
-        data["tgt_theme_msk"] = data["tgt_theme_msk"].permute(1, 0)
-
-        fullsong_input = data["tgt"][:-1, :]
-        fullsong_output = data["tgt"][1:, :]
-
-        att_msk = self.model.transformer_model.generate_square_subsequent_mask(
-            fullsong_input.shape[0]
-        ).to(self.device)
-
-        output = self.model(
-            src=data["src"],
-            tgt=fullsong_input,
-            tgt_mask=att_msk,
-            tgt_label=data["tgt_theme_msk"][:-1, :],
-            src_key_padding_mask=data["src_msk"],
-            tgt_key_padding_mask=tgt_input_msk,
-            memory_mask=None,
-        )
-        return output.view(-1, self.vocab.n_tokens)
-    
     def training_step(self, data, batch_idx):
         optimizer = self.optimizers()
         scheduler = self.lr_schedulers()
@@ -104,11 +70,11 @@ class ThemeTransformer(pl.LightningModule):
         fullsong_input = data["tgt"][:-1, :]
         fullsong_output = data["tgt"][1:, :]
 
-        att_msk = self.model.transformer_model.generate_square_subsequent_mask(
+        att_msk = self.transformer.transformer_model.generate_square_subsequent_mask(
             fullsong_input.shape[0]
         ).to(self.device)
 
-        output = self.model(
+        output = self.transformer(
             src=data["src"],
             tgt=fullsong_input,
             tgt_mask=att_msk,
@@ -129,21 +95,36 @@ class ThemeTransformer(pl.LightningModule):
         correct = correct / torch.sum(reshape_mask).item()
         self.total_acc += correct
 
-        print("Acc : {:.2f} ".format(correct), end="")
+#         print("Acc : {:.2f} ".format(correct), end="")
 
         self.manual_backward(loss)
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.args.clip)
+        torch.nn.utils.clip_grad_norm_(self.transformer.parameters(), self.args.clip)
         optimizer.step()
+
+#         if self.train_step < self.args.warmup_step:
+#             curr_lr = self.args.lr * self.train_step / self.args.warmup_step
+#             optimizer.param_groups[0]["lr"] = curr_lr
+#         else:
+#             scheduler.step()
 
         self.total_loss += loss.item()
 
+#         curr_lr = optimizer.param_groups[0]["lr"]
+#         print(
+#             "Loss : {:.2f} lr:{:.4f} ".format(
+#                 loss.item(), curr_lr
+#             ),
+#             end="\r",
+#         )
+
         self.train_step += 1
         self.log('train_loss', loss, sync_dist=True)
-        self.log('lr', curr_lr, sync_dist=True)
+#         self.log('lr', curr_lr, sync_dist=True)
 
         return {
             "loss": loss,
-            "log": {"train_loss": loss, "total_acc": self.total_acc}
+            "log": {"train_loss": loss, "total_acc": self.total_acc},
+#             "lr": curr_lr
         }
 
     def validation_step(self, data, batch_idx):
@@ -163,11 +144,11 @@ class ThemeTransformer(pl.LightningModule):
         fullsong_input = data["tgt"][:-1, :]
         fullsong_output = data["tgt"][1:, :]
 
-        att_msk = self.model.transformer_model.generate_square_subsequent_mask(
+        att_msk = self.transformer.transformer_model.generate_square_subsequent_mask(
             fullsong_input.shape[0]
         ).to(self.device)
 
-        output = self.model(
+        output = self.transformer(
             src=data["src"],
             tgt=fullsong_input,
             tgt_mask=att_msk,
