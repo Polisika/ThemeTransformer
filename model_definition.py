@@ -10,7 +10,7 @@ from parse_arg import DefaultTrainArgs
 
 
 class ThemeTransformer(pl.LightningModule):
-    def __init__(self, batch_size=64, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
+    def __init__(self, learning_rate, batch_size=64, d_model=256, num_encoder_layers=6, xorpattern=(0, 0, 0, 1, 1, 1)):
         super().__init__()
         vocab = Vocab()
         self.model = myLM(vocab.n_tokens,
@@ -26,7 +26,7 @@ class ThemeTransformer(pl.LightningModule):
         self.automatic_optimization = False
         self.criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
         self.batch_size = batch_size
-        self.learning_rate = self.args.lr
+        self.learning_rate = learning_rate
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
         val_dataset = getMusicDataset(
@@ -49,7 +49,7 @@ class ThemeTransformer(pl.LightningModule):
         return train_loader
 
     def configure_optimizers(self):
-        t = torch.optim.Adam(self.model.parameters(), lr=(self.lr or self.learning_rate))
+        t = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
         return [t], \
                [torch.optim.lr_scheduler.CosineAnnealingLR(t, T_max=self.args.max_step, eta_min=self.args.lr_min)]
     
