@@ -39,7 +39,7 @@ if __name__ == '__main__':
     myvocab = Vocab()
 
     model = ThemeTransformer()#args)
-    epochs = 15000
+    epochs = 3000
     logger = TensorBoardLogger("tensor_board_logs", name=f"model_epochs={epochs}")
     torch.set_num_threads(1)
     trainer = Trainer(devices=[4, 7],
@@ -50,8 +50,10 @@ if __name__ == '__main__':
                       check_val_every_n_epoch=10,
                       log_every_n_steps=10,
                       logger=logger,
-                      resume_from_checkpoint=args.restart_point if args.restart_point else None)
+                      resume_from_checkpoint=args.restart_point if args.restart_point else None,
+                      auto_lr_find=True)
     start = time.time()
+    trainer.tune(model)
     trainer.fit(model)
     trainer.save_checkpoint(f"model_{epochs}_epochs.ckpt")
     print(f"Training takes {(time.time() - start) / 60 / 60} hours")
