@@ -26,6 +26,7 @@ class ThemeTransformer(pl.LightningModule):
         self.automatic_optimization = False
         self.criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
         self.batch_size = batch_size
+        self.learning_rate = self.args.lr
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
         val_dataset = getMusicDataset(
@@ -48,7 +49,7 @@ class ThemeTransformer(pl.LightningModule):
         return train_loader
 
     def configure_optimizers(self):
-        t = torch.optim.Adam(self.transformer.parameters(), lr=self.args.lr)
+        t = torch.optim.Adam(self.transformer.parameters(), lr=self.learning_rate)
         return [t], \
                [torch.optim.lr_scheduler.CosineAnnealingLR(t, T_max=self.args.max_step, eta_min=self.args.lr_min)]
 
@@ -101,21 +102,7 @@ class ThemeTransformer(pl.LightningModule):
         torch.nn.utils.clip_grad_norm_(self.transformer.parameters(), self.args.clip)
         optimizer.step()
 
-        if self.train_step < self.args.warmup_step:
-            curr_lr = self.args.lr * self.train_step / self.args.warmup_step
-            optimizer.param_groups[0]["lr"] = curr_lr
-        else:
-            scheduler.step()
-
         self.total_loss += loss.item()
-
-        curr_lr = optimizer.param_groups[0]["lr"]
-        print(
-            "Loss : {:.2f} lr:{:.4f} ".format(
-                loss.item(), curr_lr
-            ),
-            end="\r",
-        )
 
         self.train_step += 1
         self.log('train_loss', loss, sync_dist=True)
@@ -123,8 +110,7 @@ class ThemeTransformer(pl.LightningModule):
 
         return {
             "loss": loss,
-            "log": {"train_loss": loss, "total_acc": self.total_acc},
-            "lr": curr_lr
+            "log": {"train_loss": loss, "total_acc": self.total_acc}
         }
 
     def validation_step(self, data, batch_idx):
