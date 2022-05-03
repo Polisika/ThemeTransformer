@@ -52,7 +52,40 @@ class ThemeTransformer(pl.LightningModule):
         t = torch.optim.Adam(self.transformer.parameters(), lr=self.learning_rate)
         return [t], \
                [torch.optim.lr_scheduler.CosineAnnealingLR(t, T_max=self.args.max_step, eta_min=self.args.lr_min)]
+    
+    def forward(self, data, batch_idx):
+        optimizer = self.optimizers()
+        scheduler = self.lr_schedulers()
+        optimizer.zero_grad()
 
+        data["src_msk"] = data["src_msk"].bool()
+        data["tgt_msk"] = data["tgt_msk"].bool()
+
+        tgt_input_msk = data["tgt_msk"][:, :-1]
+        tgt_output_msk = data["tgt_msk"][:, 1:]
+
+        data["src"] = data["src"].permute(1, 0)
+        data["tgt"] = data["tgt"].permute(1, 0)
+        data["tgt_theme_msk"] = data["tgt_theme_msk"].permute(1, 0)
+
+        fullsong_input = data["tgt"][:-1, :]
+        fullsong_output = data["tgt"][1:, :]
+
+        att_msk = self.transformer.transformer_model.generate_square_subsequent_mask(
+            fullsong_input.shape[0]
+        ).to(self.device)
+
+        output = self.transformer(
+            src=data["src"],
+            tgt=fullsong_input,
+            tgt_mask=att_msk,
+            tgt_label=data["tgt_theme_msk"][:-1, :],
+            src_key_padding_mask=data["src_msk"],
+            tgt_key_padding_mask=tgt_input_msk,
+            memory_mask=None,
+        )
+        return output.view(-1, self.vocab.n_tokens)
+    
     def training_step(self, data, batch_idx):
         optimizer = self.optimizers()
         scheduler = self.lr_schedulers()
