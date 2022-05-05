@@ -52,11 +52,11 @@ if __name__ == '__main__':
                       log_every_n_steps=10,
                       logger=logger,
                       resume_from_checkpoint=args.restart_point if args.restart_point else None,
-                      max_time=timedelta(hours=1, minutes=30),
+                      max_time=timedelta(minutes=25, seconds=30),
                      # auto_lr_find=True,
                      )
     start = time.time()
     # trainer.tune(model)
     trainer.fit(model)
-    trainer.save_checkpoint(f"model_1.5hour.ckpt")
+    trainer.save_checkpoint(f"model_25min.ckpt")
     print(f"Training takes {(time.time() - start) / 60 / 60} hours")
