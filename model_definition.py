@@ -48,7 +48,7 @@ class ThemeTransformer(pl.LightningModule):
         return train_loader
 
     def configure_optimizers(self):
-        t = torch.optim.Adam(self.transformer.parameters(), lr=self.args.lr)
+        t = torch.optim.Adam(self.transformer.parameters(), lr=self.args.lr // 2)
         return [t], \
                [torch.optim.lr_scheduler.CosineAnnealingLR(t, T_max=self.args.max_step, eta_min=self.args.lr_min)]
 
