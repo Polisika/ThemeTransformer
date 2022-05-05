@@ -52,7 +52,7 @@ if __name__ == '__main__':
                       log_every_n_steps=10,
                       logger=logger,
                       resume_from_checkpoint=args.restart_point if args.restart_point else None,
-                      max_time=timedelta(minutes=25),
+                      max_time=timedelta(hours=1, minutes=30),
                      # auto_lr_find=True,
                      )
     start = time.time()
