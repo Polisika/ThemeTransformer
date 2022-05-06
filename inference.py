@@ -36,7 +36,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "--model_path",
     type=str,
-    default="model_15000_epochs.ckpt",
+    default="model_25min.ckpt",
     help="model file",
 )
 
