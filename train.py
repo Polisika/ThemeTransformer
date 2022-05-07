@@ -43,7 +43,7 @@ if __name__ == '__main__':
     epochs = 15000
     logger = TensorBoardLogger("tensor_board_logs", name=f"model_epochs={epochs}")
     torch.set_num_threads(1)
-    trainer = Trainer(devices=[4, 7],
+    trainer = Trainer(devices=[1, 4],
                       accelerator='gpu',
                       strategy="ddp",
                       max_epochs=epochs,
@@ -52,7 +52,6 @@ if __name__ == '__main__':
                       log_every_n_steps=10,
                       logger=logger,
                       resume_from_checkpoint=args.restart_point if args.restart_point else None,
-                      max_time=timedelta(minutes=35),
                      # auto_lr_find=True,
                      )
     start = time.time()
