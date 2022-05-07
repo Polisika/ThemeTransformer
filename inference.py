@@ -81,7 +81,6 @@ myvocab = Vocab()
 device = torch.device("cuda:0")  # if args.cuda else "cpu")
 device_cpu = torch.device("cpu")
 
-
 # model definition
 print("Loading model from {}".format(args.model_path))
 print("Using device {}".format(device))
@@ -93,7 +92,7 @@ def inference(n_bars, strategies, params, theme_seq, prompt=None):
 
     Args:
         n_bars (int): numbers of bar to generate
-        strategies (dict): inferencing strategies
+        strategies (list): inferencing strategies
         params (dict): parameters for inferencing strategies
         theme_seq (list): given theme condition
         prompt (list, optional): initial tokens fed to the theme transformer. Defaults to None.
@@ -138,7 +137,7 @@ def inference(n_bars, strategies, params, theme_seq, prompt=None):
 
             # prepare input
             if initial_flag:
-                if not prompt == None:
+                if prompt is not None:
                     # prompt given
                     input_x = torch.tensor(prompt)
                     words[0].extend(prompt)
@@ -171,8 +170,8 @@ def inference(n_bars, strategies, params, theme_seq, prompt=None):
 
                 initial_flag = False
             else:
-                input_x = torch.tensor(words[0][-args.max_len :])
-                label_input = torch.tensor(label_list[-args.max_len :])
+                input_x = torch.tensor(words[0][-args.max_len:])
+                label_input = torch.tensor(label_list[-args.max_len:])
 
             input_x = input_x.reshape((-1, 1))
             label_input = label_input.reshape((-1, 1))
@@ -214,8 +213,8 @@ def inference(n_bars, strategies, params, theme_seq, prompt=None):
 
             #  check Theme_Start -> Bar
             if (
-                "Theme_Start" in word2event[words[0][-1]]
-                and "Bar" not in word2event[word]
+                    "Theme_Start" in word2event[words[0][-1]]
+                    and "Bar" not in word2event[word]
             ):
                 fail_cnt += 1
                 print(490)
@@ -223,8 +222,8 @@ def inference(n_bars, strategies, params, theme_seq, prompt=None):
 
             #  check Theme_End -> Bar
             if (
-                "Theme_End" in word2event[words[0][-1]]
-                and "Bar" not in word2event[word]
+                    "Theme_End" in word2event[words[0][-1]]
+                    and "Bar" not in word2event[word]
             ):
                 fail_cnt += 1
                 print(490)
@@ -232,80 +231,80 @@ def inference(n_bars, strategies, params, theme_seq, prompt=None):
 
             # check Note-On-[track] -> Note-Duration-[track]
             if (
-                "Note-On" in word2event[words[0][-1]]
-                and "Note-Duration" not in word2event[word]
+                    "Note-On" in word2event[words[0][-1]]
+                    and "Note-Duration" not in word2event[word]
             ):
                 fail_cnt += 1
                 print(490)
                 continue
             if (
-                "Note-On" in word2event[words[0][-1]]
-                and "Note-Duration" in word2event[word]
+                    "Note-On" in word2event[words[0][-1]]
+                    and "Note-Duration" in word2event[word]
             ):
                 if (
-                    not word2event[words[0][-1]].split("_")[0].split("-")[2]
-                    == word2event[word].split("_")[0].split("-")[2]
+                        not word2event[words[0][-1]].split("_")[0].split("-")[2]
+                            == word2event[word].split("_")[0].split("-")[2]
                 ):
                     print("Note-On,Duration Track Inconsistency")
                     continue
 
             if (
-                "Note-Duration" in word2event[word]
-                and "Note-On" not in word2event[words[0][-1]]
+                    "Note-Duration" in word2event[word]
+                    and "Note-On" not in word2event[words[0][-1]]
             ):
                 fail_cnt += 1
                 print(490)
                 continue
             if (
-                "Note-Duration" in word2event[word]
-                and "Note-On" in word2event[words[0][-1]]
+                    "Note-Duration" in word2event[word]
+                    and "Note-On" in word2event[words[0][-1]]
             ):
                 if (
-                    not word2event[words[0][-1]].split("_")[0].split("-")[2]
-                    == word2event[word].split("_")[0].split("-")[2]
+                        not word2event[words[0][-1]].split("_")[0].split("-")[2]
+                            == word2event[word].split("_")[0].split("-")[2]
                 ):
                     print("Note-On,Duration Track Inconsistency")
                     continue
 
             # check Note-Duration-[track] -> Note-Velocity-[track]
             if (
-                "Note-Duration" in word2event[words[0][-1]]
-                and "Note-Velocity" not in word2event[word]
+                    "Note-Duration" in word2event[words[0][-1]]
+                    and "Note-Velocity" not in word2event[word]
             ):
                 fail_cnt += 1
                 print(490)
                 continue
             if (
-                "Note-Duration" in word2event[words[0][-1]]
-                and "Note-Velocity" in word2event[word]
+                    "Note-Duration" in word2event[words[0][-1]]
+                    and "Note-Velocity" in word2event[word]
             ):
                 if (
-                    not word2event[words[0][-1]].split("_")[0].split("-")[2]
-                    == word2event[word].split("_")[0].split("-")[2]
+                        not word2event[words[0][-1]].split("_")[0].split("-")[2]
+                            == word2event[word].split("_")[0].split("-")[2]
                 ):
                     print("Note-Duration,Velocity Track Inconsistency")
                     continue
 
             if (
-                "Note-Velocity" in word2event[word]
-                and "Note-Duration" not in word2event[words[0][-1]]
+                    "Note-Velocity" in word2event[word]
+                    and "Note-Duration" not in word2event[words[0][-1]]
             ):
                 fail_cnt += 1
                 print(490)
                 continue
             if (
-                "Note-Velocity" in word2event[word]
-                and "Note-Duration" in word2event[words[0][-1]]
+                    "Note-Velocity" in word2event[word]
+                    and "Note-Duration" in word2event[words[0][-1]]
             ):
                 if (
-                    not word2event[words[0][-1]].split("_")[0].split("-")[2]
-                    == word2event[word].split("_")[0].split("-")[2]
+                        not word2event[words[0][-1]].split("_")[0].split("-")[2]
+                            == word2event[word].split("_")[0].split("-")[2]
                 ):
                     print("Note-Duration,Velocity Track Inconsistency")
                     continue
 
             if word2event[word].startswith("Tempo") or word2event[word].startswith(
-                "Note"
+                    "Note"
             ):
                 if position_anchor == -1:
                     print("Position not yet set")
@@ -361,7 +360,7 @@ if __name__ == "__main__":
 
     given_theme = myvocab.midi2REMI(args.theme, theme_annotations=False)
     given_theme = (
-        [myvocab.token2id["Theme_Start"]] + given_theme + [myvocab.token2id["Theme_End"]]
+            [myvocab.token2id["Theme_Start"]] + given_theme + [myvocab.token2id["Theme_End"]]
     )
 
     midiID = os.path.basename(args.theme).split(".")[0].split("_")[0]
