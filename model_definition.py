@@ -109,7 +109,7 @@ class ThemeTransformer(pl.LightningModule):
 
         self.total_loss += loss.item()
 
-#         curr_lr = optimizer.param_groups[0]["lr"]
+        curr_lr = optimizer.param_groups[0]["lr"]
 #         print(
 #             "Loss : {:.2f} lr:{:.4f} ".format(
 #                 loss.item(), curr_lr
