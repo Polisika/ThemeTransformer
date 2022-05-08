@@ -43,7 +43,7 @@ if __name__ == '__main__':
     epochs = 15000
     logger = TensorBoardLogger("tensor_board_logs", name=f"model_epochs={epochs}")
     torch.set_num_threads(1)
-    trainer = Trainer(devices=[1, 4],
+    trainer = Trainer(devices=[4, 5],
                       accelerator='gpu',
                       strategy="ddp",
                       max_epochs=epochs,
