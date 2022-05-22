@@ -101,15 +101,15 @@ class ThemeTransformer(pl.LightningModule):
         torch.nn.utils.clip_grad_norm_(self.transformer.parameters(), self.args.clip)
         optimizer.step()
 
-#         if self.train_step < self.args.warmup_step:
-#             curr_lr = self.args.lr * self.train_step / self.args.warmup_step
-#             optimizer.param_groups[0]["lr"] = curr_lr
-#         else:
-#             scheduler.step()
+        if self.train_step < self.args.warmup_step:
+            curr_lr = self.args.lr * self.train_step / self.args.warmup_step
+            optimizer.param_groups[0]["lr"] = curr_lr
+        else:
+            scheduler.step()
 
         self.total_loss += loss.item()
 
-#         curr_lr = optimizer.param_groups[0]["lr"]
+        curr_lr = optimizer.param_groups[0]["lr"]
 #         print(
 #             "Loss : {:.2f} lr:{:.4f} ".format(
 #                 loss.item(), curr_lr
@@ -119,12 +119,12 @@ class ThemeTransformer(pl.LightningModule):
 
         self.train_step += 1
         self.log('train_loss', loss, sync_dist=True)
-#         self.log('lr', curr_lr, sync_dist=True)
+        self.log('lr', curr_lr, sync_dist=True)
 
         return {
             "loss": loss,
             "log": {"train_loss": loss, "total_acc": self.total_acc},
-#             "lr": curr_lr
+            "lr": curr_lr
         }
 
     def validation_step(self, data, batch_idx):
