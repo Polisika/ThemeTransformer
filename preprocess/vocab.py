@@ -1,682 +1,401 @@
-"""Vocabulary for theme-based transformer
+"""Theme Transformer Inferencing Code
+
+usage: inference.py [-h] [--model_path MODEL_PATH] --theme THEME
+                    [--seq_length SEQ_LENGTH] [--seed SEED]
+                    [--out_midi OUT_MIDI] [--cuda] [--max_len MAX_LEN]
+                    [--temp TEMP] [--nbars NBARS]
+  --model_path MODEL_PATH   model file
+  --theme THEME             theme file
+  --seq_length SEQ_LENGTH   generated seq length
+  --seed SEED               random seed (set to -1 to use random seed) (change different if the model stucks)
+  --out_midi OUT_MIDI       output midi file
+  --cuda                    use CUDA
+  --max_len MAX_LEN         number of tokens to predict
+  --temp TEMP               temperature
+  --nbars NBARS             number of bars to generate
 
     Author: Ian Shih
     Email: yjshih23@gmail.com
     Date: 2021/11/03
-    
 """
-import math
 
-import miditoolkit
+import argparse
+import json
+import os
+
 import numpy as np
-from miditoolkit.midi import containers as ct
-from miditoolkit.midi import parser as mid_parser
+import torch
+import torch.optim
+
+from preprocess.vocab import Vocab
+from randomness import set_global_random_seed
+
+from model_definition import ThemeTransformer
+
+torch.set_num_threads(1)
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--model_path",
+    type=str,
+    default="model_25min.ckpt",
+    help="model file",
+)
+
+parser.add_argument(
+    "--theme",
+    type=str,
+    default="./theme_files/874_theme.mid",
+    help="theme file",
+)
+
+parser.add_argument("--seq_length", type=str, default="", help="generated seq length")
+
+parser.add_argument(
+    "--seed", type=int, default=-1, help="random seed (set to -1 to use random seed)"
+)
+
+parser.add_argument(
+    "--out_midi", type=str, default="output.mid", help="output midi file"
+)
+
+parser.add_argument("--cuda", action="store_true", help="use CUDA")
+
+parser.add_argument(
+    "--max_len", type=int, default=512, help="number of tokens to predict"
+)
+
+parser.add_argument("--temp", type=float, default=1.2, help="temperature")
+
+parser.add_argument(
+    "--nbars", type=float, default=16, help="number of bars to generate"
+)
+
+args = parser.parse_args()
+
+if not args.seed == -1:
+    set_global_random_seed(args.seed)
+
+# create vocab
+myvocab = Vocab()
+
+# devices
+device = torch.device("cuda:0")  # if args.cuda else "cpu")
+device_cpu = torch.device("cpu")
+
+# model definition
+print("Loading model from {}".format(args.model_path))
+print("Using device {}".format(device))
+model = ThemeTransformer.load_from_checkpoint(args.model_path)
 
 
-class Vocab(object):
-    def __init__(self):
-        """initialize some vocabulary settings"""
+def inference(n_bars, strategies, params, theme_seq, prompt=None):
+    """inference function
 
-        # split each beat into 4 subbeats
-        self.q_beat = 4
+    Args:
+        n_bars (int): numbers of bar to generate
+        strategies (list): inferencing strategies
+        params (dict): parameters for inferencing strategies
+        theme_seq (list): given theme condition
+        prompt (list, optional): initial tokens fed to the theme transformer. Defaults to None.
 
-        # dictionary for matching token ID to name and the other way around.
-        self.token2id = {}
-        self.id2token = {}
+    Returns:
+        list: token sequence of generated music
+    """
+    model.transformer.eval()
+    words = [[]]
 
-        # midi pitch number : 1 ~ 127 (highest pitch)
-        self._pitch_bins = np.arange(start=1, stop=128)
+    word2event = myvocab.id2token
 
-        # duration tokens 1~64 of self.q_beat
-        self._duration_bins = np.arange(start=1, stop=self.q_beat * 16 + 1)
+    initial_flag, initial_cnt = True, 0
 
-        # velocity tokens 1~127 (corressponding to midi format)
-        self._velocity_bins = np.arange(start=1, stop=127)
+    fail_cnt = 0
 
-        # tempo tokens 17~197 (determined from our dataset)
-        self._tempo_bins = np.arange(start=17, stop=197, step=3)
+    input_theme = torch.tensor(theme_seq)
+    input_theme = input_theme.reshape((-1, 1))
+    input_theme = input_theme.to(device)
 
-        # position(subbeat) tokens 0~15, indicate the relative position with in a bar
-        self._position_bins = np.arange(start=0, stop=16)
+    label_list = []
 
-        self.n_tokens = 0
+    previous_labeled = False
 
-        self.token_type_base = {}
+    bar_count = 0
+    position_anchor = -1
 
-        self.tracks = ["MELODY", "BRIDGE", "PIANO"]
-
-        self.build()
-
-        # vocab
-        # Note-On (129) : 0 (padding) ,1 ~ 127(highest pitch) , 128 (rest)
-        # Note-Duration : 1 ~ 16 beat * 3
-        # min resulution 1/12 notes
-
-    def build(self):
-        """build our vocab"""
-        self.token2id = {}
-        self.id2token = {}
-
-        self.n_tokens = 0
-
-        self.token2id["padding"] = 0
-        self.n_tokens += 1
-
-        # Note related tokens==================================================================
-        # Create Note-On tokens for each track
-        for track in self.tracks:
-            # Note-On
-            self.token_type_base = {"Note-On-{}".format(track): 1}
-            for i in self._pitch_bins:
-                self.token2id["Note-On-{}_{}".format(track, i)] = self.n_tokens
-                self.n_tokens += 1
-
-        # Create Note-Duration tokens for each track
-        for track in self.tracks:
-            # Note-Duration
-            self.token_type_base["Note-Duration-{}".format(track)] = self.n_tokens
-            for note_dur in self._duration_bins:
-                self.token2id[
-                    "Note-Duration-{}_{}".format(track, note_dur)
-                ] = self.n_tokens
-                self.n_tokens += 1
-
-        # Create Note-Velocity tokens for each track
-        for track in self.tracks:
-            # Note-Velocity
-            self.token_type_base["Note-Velocity-{}".format(track)] = self.n_tokens
-            for vel in self._velocity_bins:
-                self.token2id["Note-Velocity-{}_{}".format(track, vel)] = self.n_tokens
-                self.n_tokens += 1
-
-        # Metric related tokens==================================================================
-        # Tempo
-        self.token_type_base["Tempo"] = self.n_tokens
-        for tmp in self._tempo_bins:
-            self.token2id["Tempo_{}".format(tmp)] = self.n_tokens
-            self.n_tokens += 1
-
-        # Positions
-        self.token_type_base["Position"] = self.n_tokens
-        for pos in self._position_bins:
-            self.token2id["Position_{}".format(pos)] = self.n_tokens
-            self.n_tokens += 1
-
-        # Bar
-        self.token_type_base["Bar"] = self.n_tokens
-        self.token2id["Bar"] = self.n_tokens
-        self.n_tokens += 1
-
-        # Theme related tokens==================================================================
-        # Phrase annotation (not used in our final paper)
-        self.token_type_base["Phrase"] = self.n_tokens
-        self.token2id["Phrase_Start"] = self.n_tokens
-        self.n_tokens += 1
-
-        self.token2id["Phrase_End"] = self.n_tokens
-        self.n_tokens += 1
-
-        # Theme annotation
-        self.token_type_base["Theme"] = self.n_tokens
-        self.token2id["Theme_Start"] = self.n_tokens
-        self.n_tokens += 1
-
-        self.token2id["Theme_End"] = self.n_tokens
-        self.n_tokens += 1
-
-        for w, v in self.token2id.items():
-            self.id2token[v] = w
-
-        self.n_tokens = len(self.token2id)
-
-    def getPitch(self, input_event):
-        """Return corresponding note pitch
-        if input_event is not a note, it returns -1
-
-        Args:
-            input_event (str or int): REMI Event Name or vocab ID
-        """
-        if isinstance(input_event, int):
-            input_event = self.id2token[input_event]
-        elif isinstance(input_event, str):
-            pass
-        else:
-            try:
-                input_event = int(input_event)
-                input_event = self.id2token[input_event]
-            except:
-                raise TypeError(
-                    "input_event should be int or str, input_event={}, type={}".format(
-                        input_event, type(input_event)
-                    )
-                )
-
-        if not input_event.startswith("Note-On"):
-            return -1
-
-        assert (
-            int(input_event.split("_")[1]) >= 1
-            and int(input_event.split("_")[1]) <= 127
-        )
-        return int(input_event.split("_")[1])
-
-    def midi2REMI(
-        self,
-        midi_path,
-        quantize=True,
-        trim_intro=True,
-        trim_outro=True,
-        include_bridge=False,
-        extend_theme=False,
-        bar_first=False,
-        theme_annotations=True,
-        verbose=False,
-    ):
-        """convert midi file to token representation
-
-        Args:
-            midi_path (str): the path of input midi file
-            trim_intro (bool, optional): ignore the intro part of the song. Defaults to True.
-            trim_outro (bool, optional): ignore the outro part of the song. Defaults to True.
-            include_bridge (bool, optional): ignore the intro part of the song. Defaults to False.
-            extend_theme (bool, optional): extend the theme region to at least MIN_MEL_NOTES=8 notes. Defaults to False.
-            bar_first (bool, optional): place Bar token in front of Theme-Start token. Defaults to False.
-            theme_annotations (bool, optional): including theme-realted tokens. Defaults to True.
-            verbose (bool, optional): print some message. Defaults to False.
-
-        Returns:
-            list: sequence of tokens
-        """
-        MIN_MEL_NOTES = 8
-        midi_obj = mid_parser.MidiFile(midi_path)
-        # calculate the min step (in ticks) for REMI representation
-        min_step = midi_obj.ticks_per_beat * 4 / 16
-
-        # quantize
-        if quantize:
-            for i in range(len(midi_obj.instruments)):
-                for n in range(len(midi_obj.instruments[i].notes)):
-                    midi_obj.instruments[i].notes[n].start = int(
-                        int(midi_obj.instruments[i].notes[n].start / min_step)
-                        * min_step
-                    )
-                    midi_obj.instruments[i].notes[n].end = int(
-                        int(midi_obj.instruments[i].notes[n].end / min_step) * min_step
-                    )
-
-        if theme_annotations:
-            # select theme info track
-            theme_boundary_track = list(
-                filter(lambda x: x.name == "theme info track", midi_obj.instruments)
+    with torch.no_grad():
+        while bar_count < n_bars:
+            print(
+                "events #{} Generating Bars #{}/{}".format(
+                    len(words[0]), bar_count, bar_count
+                ),
+                end="\r",
             )
-            assert len(theme_boundary_track) == 1
+            if fail_cnt:
+                print("failed iterations:", fail_cnt)
 
-        # parsing notes in each tracks (ignore BRIDGE)
-        notesAndtempos = []
-        midi_obj.instruments[0].notes = sorted(
-            midi_obj.instruments[0].notes, key=lambda x: x.start
-        )
-        # add notes
-        melody_start = sorted(midi_obj.instruments[0].notes, key=lambda x: x.start)[
-            0
-        ].start
-        melody_end = sorted(midi_obj.instruments[0].notes, key=lambda x: x.start)[
-            -1
-        ].end
-        for i in range(3):
-            if not include_bridge and midi_obj.instruments[i].name == "BRIDGE":
-                continue
-            if midi_obj.instruments[i].name == "Theme info track":
-                continue
+            if fail_cnt > 1024:
+                print("model stuck ...\nPlease change a seed sand inference again!")
+                return words[0]
 
-            notes = midi_obj.instruments[i].notes
-            for n in notes:
-                # assert (trim_intro and n.start>=melody_start or not trim_intro)
-                if trim_intro and n.start >= melody_start or not trim_intro:
-                    if trim_outro and n.start <= melody_end or not trim_outro:
-                        notesAndtempos.append(
-                            {
-                                "priority": i + 1,
-                                "priority_1": n.pitch,
-                                "start_tick": n.start,
-                                "obj_type": "Note-{}".format(
-                                    midi_obj.instruments[i].name
-                                ),
-                                "obj": n,
-                            }
-                        )
-        # add tempos
-        for t in midi_obj.tempo_changes:
-            # assert (trim_intro and t.time>=melody_start or not trim_intro)
-            if trim_intro and t.time >= melody_start or not trim_intro or trim_intro:
-                if trim_outro and t.time <= melody_end or not trim_outro:
-                    notesAndtempos.append(
-                        {
-                            "priority": 0,
-                            "priority_1": 0,
-                            "start_tick": t.time,
-                            "obj_type": "Tempo",
-                            "obj": t,
-                        }
-                    )
+            # prepare input
+            if initial_flag:
+                if prompt is not None:
+                    # prompt given
+                    input_x = torch.tensor(prompt)
+                    words[0].extend(prompt)
+                    label_list = [0] * len(prompt)
+                    for i, x in enumerate(prompt):
+                        if myvocab.id2token[x] == "Theme_Start":
+                            previous_labeled = True
+                        elif myvocab.id2token[x] == "Theme_End":
+                            previous_labeled = False
+                        if previous_labeled:
+                            if i == 0:
+                                label_list[i] = 1
+                            else:
+                                label_list[i] = label_list[i - 1] + 1
+                        if myvocab.id2token[x].startswith("Position"):
+                            position_anchor = int(myvocab.id2token[x].split("_")[1])
+                        if myvocab.id2token[x] == "Bar":
+                            position_anchor = -1
+                            n_bars += 1
 
-        if (
-            trim_intro
-            and len([x for x in midi_obj.tempo_changes if x.time == melody_start]) == 0
-        ):
-            t = [
-                x
-                for x in sorted(midi_obj.tempo_changes, key=lambda z: z.time)
-                if x.time < melody_start
-            ]
-            if not len(t) == 0:
-                t = t[-1]
-                notesAndtempos.append(
-                    {
-                        "priority": 0,
-                        "priority_1": 0,
-                        "start_tick": melody_start,
-                        "obj_type": "Tempo",
-                        "obj": t,
-                    }
-                )
-        notesAndtempos = sorted(
-            notesAndtempos,
-            key=lambda x: (x["start_tick"], x["priority"], -x["priority_1"]),
-        )
-
-        if theme_annotations:
-            theme_boundary_track = theme_boundary_track[0]
-            theme_boundary_pitch = min([x.pitch for x in theme_boundary_track.notes])
-            theme_boundaries = [
-                [x.start, x.end]
-                for x in theme_boundary_track.notes
-                if x.pitch == theme_boundary_pitch
-            ]
-            assert not len(theme_boundaries) == 0
-            if verbose:
-                print(theme_boundaries)
-
-        if extend_theme:
-            # extend theme region 8~9
-            for b_i, b in enumerate(theme_boundaries[:-1]):
-
-                melody_notes = [
-                    x
-                    for x in midi_obj.instruments[0].notes
-                    if x.start >= b[0] and x.start < theme_boundaries[b_i + 1][0]
-                ]
-                cur_bound = 0
-                for x in melody_notes:
-                    if x.start < b[1]:
-                        cur_bound += 1
-                    else:
-                        break
-                if cur_bound + 1 >= MIN_MEL_NOTES:
-                    continue
-                # try to extend
-                extend_idx = min(MIN_MEL_NOTES, len(melody_notes)) - 1
-                theme_boundaries[b_i][1] = melody_notes[extend_idx].end
-
-        b_i = 0
-        in_theme = False
-        # group
-        bar_segments = []
-        bar_ticks = midi_obj.ticks_per_beat * 4
-        if verbose:
-            print("Bar tick length: {}".format(bar_ticks))
-
-        for bar_start_tick in range(0, notesAndtempos[-1]["start_tick"], bar_ticks):
-            if verbose:
-                print(
-                    "Bar {} at tick: {}".format(
-                        bar_start_tick // bar_ticks, bar_start_tick
-                    )
-                )
-            bar_end_tick = bar_start_tick + bar_ticks
-            current_bar = []
-            bar_objs = list(
-                filter(
-                    lambda x: x["start_tick"] >= bar_start_tick
-                    and x["start_tick"] < bar_end_tick,
-                    notesAndtempos,
-                )
-            )
-            bar_objs.insert(0, {"start_tick": -1})
-
-            if not bar_first:
-                if (
-                    theme_annotations
-                    and not in_theme
-                    and theme_boundaries[b_i][0] == bar_start_tick
-                ):
-                    current_bar.append("Theme_Start")
-                    in_theme = True
-                    if verbose:
-                        print("Theme start")
-
-                if (
-                    not in_theme
-                    and trim_intro
-                    and bar_start_tick + bar_ticks < melody_start
-                ):
-                    if verbose:
-                        print("into trimmed")
-                    continue
-
-                current_bar.append("Bar")
-            else:
-                if (
-                    not in_theme
-                    and trim_intro
-                    and bar_start_tick + bar_ticks < melody_start
-                ):
-                    if verbose:
-                        print("into trimmed")
-                    continue
-
-                current_bar.append("Bar")
-
-                if (
-                    theme_annotations
-                    and not in_theme
-                    and theme_boundaries[b_i][0] == bar_start_tick
-                ):
-                    current_bar.append("Theme_Start")
-                    in_theme = True
-                    if verbose:
-                        print("Theme start")
-
-            for i, obj in enumerate(bar_objs):
-                if obj["start_tick"] == -1:
-                    continue
-                if not obj["start_tick"] == bar_objs[i - 1]["start_tick"]:
-                    # insert Position Event
-                    pos = (
-                        (obj["start_tick"] - bar_start_tick)
-                        / midi_obj.ticks_per_beat
-                        * self.q_beat
-                    )
-                    pos_index = np.argmin(
-                        abs(pos - self._position_bins)
-                    )  # use the closest position
-                    pos = self._position_bins[pos_index]
-                    current_bar.append("Position_{}".format(pos))
-
-                if obj["obj_type"].startswith("Note"):
-                    track_name = obj["obj_type"].split("-")[1].upper()
-                    # add pitch
-                    current_bar.append(
-                        "Note-On-{}_{}".format(track_name, obj["obj"].pitch)
-                    )
-                    # add duration
-                    dur = (
-                        (obj["obj"].end - obj["obj"].start)
-                        / midi_obj.ticks_per_beat
-                        * self.q_beat
-                    )
-                    dur_index = np.argmin(
-                        abs(dur - self._duration_bins)
-                    )  # use the closest position
-                    dur = self._duration_bins[dur_index]
-                    current_bar.append("Note-Duration-{}_{}".format(track_name, dur))
-                    # add velocity
-                    vel_index = np.argmin(
-                        abs(obj["obj"].velocity - self._velocity_bins)
-                    )  # use the closest position
-                    vel = self._velocity_bins[vel_index]
-                    current_bar.append("Note-Velocity-{}_{}".format(track_name, vel))
-                elif obj["obj_type"].startswith("Tempo"):
-                    # tempo
-                    tmp_index = np.argmin(
-                        abs(obj["obj"].tempo - self._tempo_bins)
-                    )  # use the closest position
-                    tmp = self._tempo_bins[tmp_index]
-                    current_bar.append(obj["obj_type"] + "_{}".format(tmp))
+                    label_input = torch.tensor(label_list)
                 else:
-                    # theme start end
-                    current_bar.append(obj["obj_type"])
+                    # no prompt given
+                    input_x = torch.tensor([theme_seq[0]])
+                    label_list = [0]
+                    words[0].append(theme_seq[0])
+                    if myvocab.id2token[theme_seq[0]] == "Theme_Start":
+                        previous_labeled = True
+                    label_input = torch.tensor(label_list)
+
+                initial_flag = False
+            else:
+                input_x = torch.tensor(words[0][-args.max_len:])
+                label_input = torch.tensor(label_list[-args.max_len:])
+
+            input_x = input_x.reshape((-1, 1))
+            label_input = label_input.reshape((-1, 1))
+
+            input_x_att_msk = model.transformer.transformer_model.generate_square_subsequent_mask(
+                input_x.shape[0]
+            )
+            input_x = input_x.to(device)
+            label_input = label_input.to(device)
+            input_x_att_msk = input_x_att_msk.to(device)
+
+            logits = model.transformer(
+                src=input_theme,
+                tgt=input_x,
+                tgt_label=label_input,
+                tgt_mask=input_x_att_msk,
+            )
+            logits = logits[-1:]
+            logits = torch.squeeze(logits)
+            logits = logits.cpu().numpy()
+
+            # temperature or not
+            if "temperature" in strategies:
+                probs = model.transformer.temperature(logits=logits, temperature=params["t"])
+            else:
+                probs = model.transformer.temperature(logits=logits, temperature=1.0)
+
+            # sampling
+            # word : the generated remi event
+            word = model.transformer.nucleus(probs=probs, p=params["p"])
+
+            print("Generated new remi word {}".format(myvocab.id2token[word]))
+            # skip padding
+            if word in [0]:
+                fail_cnt += 1
+                continue
+
+            # grammar checking ========================================================
+
+            #  check Theme_Start -> Bar
+            if (
+                    "Theme_Start" in word2event[words[0][-1]]
+                    and "Bar" not in word2event[word]
+            ):
+                fail_cnt += 1
+                print(490)
+                continue
+
+            #  check Theme_End -> Bar
+            if (
+                    "Theme_End" in word2event[words[0][-1]]
+                    and "Bar" not in word2event[word]
+            ):
+                fail_cnt += 1
+                print(490)
+                continue
+
+            # check Note-On-[track] -> Note-Duration-[track]
+            if (
+                    "Note-On" in word2event[words[0][-1]]
+                    and "Note-Duration" not in word2event[word]
+            ):
+                fail_cnt += 1
+                print(490)
+                continue
+            if (
+                    "Note-On" in word2event[words[0][-1]]
+                    and "Note-Duration" in word2event[word]
+            ):
+                if (
+                        not word2event[words[0][-1]].split("_")[0].split("-")[2]
+                            == word2event[word].split("_")[0].split("-")[2]
+                ):
+                    print("Note-On,Duration Track Inconsistency")
+                    continue
 
             if (
-                theme_annotations
-                and in_theme
-                and theme_boundaries[b_i][1] == bar_start_tick + bar_ticks
+                    "Note-Duration" in word2event[word]
+                    and "Note-On" not in word2event[words[0][-1]]
             ):
-                current_bar.append("Theme_End")
-                in_theme = False
-                if verbose:
-                    print("Theme End")
-                if not b_i == len(theme_boundaries) - 1:
-                    b_i += 1
-            bar_segments.extend(current_bar)
+                fail_cnt += 1
+                print(490)
+                continue
+            if (
+                    "Note-Duration" in word2event[word]
+                    and "Note-On" in word2event[words[0][-1]]
+            ):
+                if (
+                        not word2event[words[0][-1]].split("_")[0].split("-")[2]
+                            == word2event[word].split("_")[0].split("-")[2]
+                ):
+                    print("Note-On,Duration Track Inconsistency")
+                    continue
 
-        output_ids = [self.token2id[x] for x in bar_segments]
+            # check Note-Duration-[track] -> Note-Velocity-[track]
+            if (
+                    "Note-Duration" in word2event[words[0][-1]]
+                    and "Note-Velocity" not in word2event[word]
+            ):
+                fail_cnt += 1
+                print(490)
+                continue
+            if (
+                    "Note-Duration" in word2event[words[0][-1]]
+                    and "Note-Velocity" in word2event[word]
+            ):
+                if (
+                        not word2event[words[0][-1]].split("_")[0].split("-")[2]
+                            == word2event[word].split("_")[0].split("-")[2]
+                ):
+                    print("Note-Duration,Velocity Track Inconsistency")
+                    continue
 
-        return output_ids
+            if (
+                    "Note-Velocity" in word2event[word]
+                    and "Note-Duration" not in word2event[words[0][-1]]
+            ):
+                fail_cnt += 1
+                print(490)
+                continue
+            if (
+                    "Note-Velocity" in word2event[word]
+                    and "Note-Duration" in word2event[words[0][-1]]
+            ):
+                if (
+                        not word2event[words[0][-1]].split("_")[0].split("-")[2]
+                            == word2event[word].split("_")[0].split("-")[2]
+                ):
+                    print("Note-Duration,Velocity Track Inconsistency")
+                    continue
 
-    def preprocessREMI(
-        self,
-        remi_sequence,
-        always_include=False,
-        max_seq_len=512,
-        strict=True,
-        verbose=False,
-    ):
-        """Preprocess token sequence
+            if word2event[word].startswith("Tempo") or word2event[word].startswith(
+                    "Note"
+            ):
+                if position_anchor == -1:
+                    print("Position not yet set")
+                    fail_cnt += 1
+                    continue
 
-        slicing the sequence for training our models
-
-        Args:
-            remi_sequence (List): the music token seqeunce
-            always_include (Bool): selected the data including either Theme-Start or Theme-End
-            max_seq_len (Int): maximum sequence length for each data
-            strict (Bool): the returning sequence should always include Theme-Start
-
-        Return:
-            {
-                "src" : <corressponding theme condition>,
-                "src_theme_binary_msk" : <corressponding theme condition's theme msk>,
-                "tgt_segments" : <list of target sequences>,
-                "tgt_segments_theme_binary_msk" : <list of target sequences theme msk>
-            }
-        """
-        theme_binary_msk = []
-        in_theme = False
-        src = []
-        src_theme_binary_msk = []
-        for r in remi_sequence:
-            if self.id2token[r] == "Theme_Start":
-                in_theme = True
-            elif self.id2token[r] == "Theme_End":
-                in_theme = False
-            theme_binary_msk.append(int(in_theme))
-
-        for i in range(1, len(theme_binary_msk)):
-            theme_binary_msk[i] = (
-                theme_binary_msk[i - 1] * theme_binary_msk[i] + theme_binary_msk[i]
-            )
-
-        start_first_theme = remi_sequence.index(self.token2id["Theme_Start"])
-        end_first_theme = remi_sequence.index(self.token2id["Theme_End"])
-        src = remi_sequence[start_first_theme : end_first_theme + 1]
-        src_theme_binary_msk = theme_binary_msk[start_first_theme : end_first_theme + 1]
-
-        tgt_segments = []
-        tgt_segments_theme_msk = []
-
-        s = 0
-        if strict:
-            theme_start_pos = [
-                i
-                for i in range(len(remi_sequence))
-                if remi_sequence[i] == self.token2id["Theme_Start"]
-            ]
-            for t in theme_start_pos:
-                tgt_segments.append(remi_sequence[t : t + max_seq_len + 1])
-                tgt_segments_theme_msk.append(theme_binary_msk[t : t + max_seq_len + 1])
-        else:
-            total_s = math.ceil(len(remi_sequence) / max_seq_len)
-            for x in range(0, len(remi_sequence), max_seq_len):
-                if always_include:
-                    # if self.token2id["Theme_Start"] in remi_sequence[x:x+max_seq_len+1]:
-                    if (
-                        self.token2id["Theme_Start"]
-                        in remi_sequence[x : x + max_seq_len + 1]
-                        or self.token2id["Theme_End"]
-                        in remi_sequence[x : x + max_seq_len + 1]
-                    ):
-                        s += 1
-                        tgt_segments.append(remi_sequence[x : x + max_seq_len + 1])
-                        tgt_segments_theme_msk.append(
-                            theme_binary_msk[x : x + max_seq_len + 1]
-                        )
+            # check position number
+            if word2event[word].startswith("Position"):
+                pos = int(word2event[word].split("_")[1])
+                if position_anchor == pos:
+                    print("Position not increasing")
+                    fail_cnt += 1
+                    continue
                 else:
-                    tgt_segments.append(remi_sequence[x : x + max_seq_len + 1])
-                    tgt_segments_theme_msk.append(
-                        theme_binary_msk[x : x + max_seq_len + 1]
-                    )
+                    position_anchor = pos
 
-            if verbose and always_include:
-                print("Include Theme Start {}/{}".format(s, total_s))
+            # check theme region
+            if myvocab.id2token[word].startswith("Theme"):
+                if myvocab.id2token[word] == "Theme_Start" and not previous_labeled:
+                    previous_labeled = True
+                    last_theme_bar_idx = bar_count
 
-        return {
-            "src": src,
-            "src_theme_binary_msk": src_theme_binary_msk,
-            "tgt_segments": tgt_segments,
-            "tgt_segments_theme_binary_msk": tgt_segments_theme_msk,
-        }
-
-    def REMIID2midi(self, event_ids, midi_path, verbose=False):
-        """convert tokens to midi file
-        The output midi file will contains 3 tracks:
-            MELODY : melodt notes
-            PIANO : accompaniment notes
-            Theme info track : notes indicating theme region (using note start tick and end tick as the boundary of theme region)
-        Args:
-            event_ids (list): sequence of tokens
-            midi_path (str): the output midi file path
-            verbose (bool, optional): print some message. Defaults to False.
-        """
-
-        # create midi file
-        new_mido_obj = mid_parser.MidiFile()
-        new_mido_obj.ticks_per_beat = 120
-
-        # create tracks
-        music_tracks = {}
-        music_tracks["MELODY"] = ct.Instrument(program=0, is_drum=False, name="MELODY")
-        music_tracks["PIANO"] = ct.Instrument(program=0, is_drum=False, name="PIANO")
-        music_tracks["Theme info track"] = ct.Instrument(
-            program=0, is_drum=False, name="Theme info track"
-        )
-
-        # all our generated music are 4/4
-        new_mido_obj.time_signature_changes.append(miditoolkit.TimeSignature(4, 4, 0))
-
-        ticks_per_step = new_mido_obj.ticks_per_beat / self.q_beat
-
-        # convert tokens from id to string
-        events = []
-        for x in event_ids:
-            events.append(self.id2token[x])
-
-        # parsing tokens
-        last_tick = 0
-        current_bar_anchor = 0
-        current_theme_boundary = []
-        motif_label_segs = []
-        idx = 0
-        first_bar = True
-        while idx < len(events):
-            if events[idx] == "Bar":
-                if first_bar:
-                    current_bar_anchor = 0
-                    first_bar = False
+                elif myvocab.id2token[word] == "Theme_End" and previous_labeled:
+                    previous_labeled = False
                 else:
-                    current_bar_anchor += new_mido_obj.ticks_per_beat * 4
-                idx += 1
-            elif events[idx].startswith("Position"):
-                pos = int(events[idx].split("_")[1])
-                last_tick = pos * ticks_per_step + current_bar_anchor
-                idx += 1
-            elif events[idx].startswith("Tempo"):
-                tmp = pos = int(events[idx].split("_")[1])
-                new_mido_obj.tempo_changes.append(
-                    ct.TempoChange(tempo=int(tmp), time=int(last_tick))
-                )
-                idx += 1
-            elif events[idx].startswith("Note"):
-                track_name = events[idx].split("_")[0].split("-")[2]
-                assert track_name in music_tracks
-                assert events[idx].startswith("Note-On")
-                assert events[idx + 1].startswith("Note-Duration")
-                assert events[idx + 2].startswith("Note-Velocity")
+                    print("Theme region error")
+                    fail_cnt += 1
+                    continue
 
-                new_note = miditoolkit.Note(
-                    velocity=int(events[idx + 2].split("_")[1]),
-                    pitch=int(events[idx].split("_")[1]),
-                    start=int(last_tick),
-                    end=int(int(events[idx + 1].split("_")[1]) * ticks_per_step)
-                    + int(last_tick),
-                )
-                music_tracks[track_name].notes.append(new_note)
-                idx += 3
-            elif events[idx] == "Theme_Start":
-                assert len(current_theme_boundary) == 0
-                current_theme_boundary.append(last_tick)
-                idx += 1
-            elif events[idx] == "Theme_End":
-                assert len(current_theme_boundary) == 1
-                current_theme_boundary.append(last_tick)
-                motif_label_segs.append(current_theme_boundary)
-                music_tracks["Theme info track"].notes.append(
-                    miditoolkit.Note(
-                        velocity=1,
-                        pitch=1,
-                        start=int(current_theme_boundary[0]),
-                        end=int(current_theme_boundary[1]),
-                    )
-                )
-                current_theme_boundary = []
-                idx += 1
+            # add new event to record sequence
+            words[0].append(word)
+            if previous_labeled:
+                label_list.append(label_list[-1] + 1)
+            else:
+                label_list.append(0)
 
-        # add tracks to midi file
-        new_mido_obj.instruments.extend([music_tracks[ins] for ins in music_tracks])
+            if word2event[word] == "Bar":
+                bar_count += 1
+                position_anchor = -1
+                if bar_count > n_bars:
+                    return words[0]
 
-        if verbose:
-            print("Saving midi to ({})".format(midi_path))
+            fail_cnt = 0
 
-        # save to disk
-        new_mido_obj.dump(midi_path)
-
-    def __str__(self):
-        """return all tokens
-
-        Returns:
-            str: string of all tokens
-        """
-        ret = ""
-        for w, i in self.token2id.items():
-            ret = ret + "{} : {}\n".format(w, i)
-
-        for i, w in self.id2token.items():
-            ret = ret + "{} : {}\n".format(i, w)
-
-        ret += "\nTotal events #{}".format(len(self.id2token))
-
-        return ret
-
-    def __repr__(self):
-        """return string all token
-
-        Returns:
-            str: string of sll tokens
-        """
-        return self.__str__()
+    print("generated {} events".format(len(words[0])))
+    return words[0]
 
 
 if __name__ == "__main__":
-    # print all tokens
-    myvocab = Vocab()
+    # load tempo information
+    with open("./tempo_dict.json") as f:
+        tempo_dict = json.load(f)
 
-    print(myvocab)
+    given_theme = myvocab.midi2REMI(args.theme, theme_annotations=False)
+    given_theme = (
+            [myvocab.token2id["Theme_Start"]] + given_theme + [myvocab.token2id["Theme_End"]]
+    )
+
+    midiID = os.path.basename(args.theme).split(".")[0].split("_")[0]
+    tempo_dict[midiID] = 120
+    print("Tempo from original : {}".format(tempo_dict[midiID]))
+    tmp = myvocab._tempo_bins[np.argmin(abs(tempo_dict[midiID] - myvocab._tempo_bins))]
+    given_tempo = myvocab.token2id["Tempo_{}".format(tmp)]
+
+    tempo_in_theme = [x for x in given_theme if myvocab.id2token[x].startswith("Tempo")]
+    if not len(tempo_in_theme) == 0:
+        # remove error tempo
+        given_theme = [
+            x for x in given_theme if not myvocab.id2token[x].startswith("Tempo")
+        ]
+
+    model.to(device)
+    word_seq = inference(
+        n_bars=args.nbars,
+        strategies=["temperature", "nucleus"],
+        params={"t": args.temp, "p": 0.9},
+        theme_seq=given_theme,
+        prompt=[given_tempo, myvocab.token2id["Theme_Start"]],
+    )
+
+    # check if no tempo in front , add it
+    position_events = [
+        i for i, x in enumerate(word_seq) if myvocab.id2token[x].startswith("Position")
+    ]
+    if not word_seq[position_events[0] + 1] == given_tempo:
+        word_seq.insert(position_events[0] + 1, given_tempo)
+
+    # remove tempo
+    word_seq = word_seq[1:]
+
+    # save to disk
+    myvocab.REMIID2midi(word_seq, args.out_midi)
+    print("{} saved".format(args.out_midi))
