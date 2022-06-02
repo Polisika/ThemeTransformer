@@ -32,6 +32,7 @@ from randomness import set_global_random_seed
 
 from model_definition import ThemeTransformer
 
+torch.set_num_threads(1)
 parser = argparse.ArgumentParser()
 parser.add_argument(
     "--model_path",
@@ -66,7 +67,7 @@ parser.add_argument(
 parser.add_argument("--temp", type=float, default=1.2, help="temperature")
 
 parser.add_argument(
-    "--nbars", type=float, default=32, help="number of bars to generate"
+    "--nbars", type=float, default=16, help="number of bars to generate"
 )
 
 args = parser.parse_args()
@@ -364,6 +365,7 @@ if __name__ == "__main__":
     )
 
     midiID = os.path.basename(args.theme).split(".")[0].split("_")[0]
+    tempo_dict[midiID] = 120
     print("Tempo from original : {}".format(tempo_dict[midiID]))
     tmp = myvocab._tempo_bins[np.argmin(abs(tempo_dict[midiID] - myvocab._tempo_bins))]
     given_tempo = myvocab.token2id["Tempo_{}".format(tmp)]
