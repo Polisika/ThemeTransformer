@@ -607,11 +607,14 @@ class Vocab(object):
                 idx += 1
             elif events[idx].startswith("Note"):
                 track_name = events[idx].split("_")[0].split("-")[2]
-                assert track_name in music_tracks
+                # assert track_name in music_tracks
                 assert events[idx].startswith("Note-On")
                 assert events[idx + 1].startswith("Note-Duration")
                 assert events[idx + 2].startswith("Note-Velocity")
-
+                
+                if track_name == "BRIDGE":
+                    track_name = "PIANO"
+                
                 new_note = miditoolkit.Note(
                     velocity=int(events[idx + 2].split("_")[1]),
                     pitch=int(events[idx].split("_")[1]),
@@ -638,6 +641,8 @@ class Vocab(object):
                     )
                 )
                 current_theme_boundary = []
+                idx += 1
+            else:
                 idx += 1
 
         # add tracks to midi file
